@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Zakira.Conduit</RootNamespace>
+    <AssemblyName>conduit</AssemblyName>
+
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>conduit</ToolCommandName>
+    <PackageId>Zakira.Conduit</PackageId>
+    <Description>A .NET global tool that synchronizes agent skills from remote sources (GitHub, ...) into one or more local target directories, based on a manifest file.</Description>
+    <PackageTags>conduit;agent-skills;sync;cli;dotnet-tool;agents</PackageTags>
+
+    <RollForward>LatestMajor</RollForward>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zakira.Conduit.Core\Zakira.Conduit.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+</Project>

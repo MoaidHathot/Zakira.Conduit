@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Zakira.Conduit.Core/Zakira.Conduit.Core.csproj" />
+    <Project Path="src/Zakira.Conduit/Zakira.Conduit.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Zakira.Conduit.Core.UnitTests/Zakira.Conduit.Core.UnitTests.csproj" />
+    <Project Path="tests/Zakira.Conduit.E2ETests/Zakira.Conduit.E2ETests.csproj" />
+    <Project Path="tests/Zakira.Conduit.IntegrationTests/Zakira.Conduit.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/anomalyco/Zakira.Conduit/main/schemas/conduit.schema.json",
+  "title": "Zakira.Conduit manifest",
+  "description": "Manifest describing skill sources to mirror into one or more local target directories.",
+  "type": "object",
+  "required": ["entries"],
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest schema version. Must be 1."
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" },
+      "minItems": 1
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["name", "source", "targets"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "description": "Unique entry name. Used as the sub-directory name inside each target."
+        },
+        "description": { "type": "string" },
+        "disabled": { "type": "boolean", "default": false },
+        "source": { "$ref": "#/$defs/source" },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "source": {
+      "oneOf": [
+        { "$ref": "#/$defs/githubSource" },
+        { "$ref": "#/$defs/localSource" }
+      ]
+    },
+    "githubSource": {
+      "type": "object",
+      "required": ["type", "owner", "repo"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "github" },
+        "owner": { "type": "string", "minLength": 1 },
+        "repo": { "type": "string", "minLength": 1 },
+        "path": {
+          "type": "string",
+          "description": "Optional repository-relative sub-path. Forward slashes."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch or tag name. Mutually exclusive with 'commit'."
+        },
+        "commit": {
+          "type": "string",
+          "description": "Commit SHA. Mutually exclusive with 'branch'."
+        }
+      },
+      "not": {
+        "required": ["branch", "commit"]
+      }
+    },
+    "localSource": {
+      "type": "object",
+      "required": ["type", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "local" },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Local directory whose contents are mirrored. Absolute, or relative to the manifest's directory. Supports ~ and environment variables."
+        }
+      }
+    }
+  }
+}

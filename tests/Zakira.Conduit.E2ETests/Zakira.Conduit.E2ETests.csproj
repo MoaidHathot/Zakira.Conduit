@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Zakira.Conduit.E2ETests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- E2E spawns the CLI as a subprocess; ensure it's built first. -->
+    <ProjectReference Include="..\..\src\Zakira.Conduit\Zakira.Conduit.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" Private="false" />
+    <ProjectReference Include="..\..\src\Zakira.Conduit.Core\Zakira.Conduit.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Share the HTTP-mock and temp-dir helpers with the IntegrationTests project. -->
+    <Compile Include="..\Zakira.Conduit.IntegrationTests\TestHelpers\MockGitHubServer.cs" Link="TestHelpers\MockGitHubServer.cs" />
+    <Compile Include="..\Zakira.Conduit.IntegrationTests\TestHelpers\TempDir.cs" Link="TestHelpers\TempDir.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Verify.Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="AwesomeAssertions" />
+    <Using Include="VerifyXunit" />
+  </ItemGroup>
+
+</Project>

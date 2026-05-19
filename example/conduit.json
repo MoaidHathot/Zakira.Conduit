@@ -1,0 +1,85 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anomalyco/Zakira.Conduit/main/schemas/conduit.schema.json",
+  "version": 1,
+
+  "entries": [
+
+    // ---------------------------------------------------------------------
+    // 1) Pull a single skill out of a multi-skill GitHub repository,
+    //    tracking the latest commit on `main`.
+    // ---------------------------------------------------------------------
+    {
+      "name": "code-review",
+      "description": "Code-review skill from a public GitHub repo, tracking main.",
+      "source": {
+        "type": "github",
+        "owner": "anthropics",
+        "repo": "skills",
+        "path": "code-review",
+        "branch": "main"
+      },
+      "targets": [
+        "~/.config/claude/skills",
+        "~/projects/my-app/.agents/skills"
+      ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 2) Pin an internal repo to an immutable commit SHA. Useful when you
+    //    want every machine to receive byte-for-byte identical content.
+    //    A `CONDUIT_GITHUB_TOKEN` (or `GITHUB_TOKEN`) env var lifts the
+    //    anonymous rate limit and unlocks private repos.
+    // ---------------------------------------------------------------------
+    {
+      "name": "internal-runbooks",
+      "description": "Private runbooks pinned to a specific commit.",
+      "source": {
+        "type": "github",
+        "owner": "my-org",
+        "repo": "agent-runbooks",
+        "commit": "1f2e3d4c5b6a7980abcdef0123456789abcdef01"
+      },
+      "targets": [
+        "$XDG_CONFIG_HOME/agents/skills"
+      ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 3) A local skill that lives next to this manifest (relative paths
+    //    are anchored at the manifest's own directory). Use this for
+    //    in-house skills you check in alongside your code, or for any
+    //    folder you'd otherwise `cp -R` by hand.
+    // ---------------------------------------------------------------------
+    {
+      "name": "local-skill-sample",
+      "description": "House-style skill kept in this repo. Edit the files in ./local-skill-sample and re-run `conduit sync`.",
+      "source": {
+        "type": "local",
+        "path": "./local-skill-sample"
+      },
+      "targets": [
+        "~/.config/claude/skills",
+        "~/projects/my-app/.agents/skills"
+      ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 4) An entry parked but kept in the manifest for documentation.
+    //    `conduit sync` skips this one until you flip `disabled` back.
+    // ---------------------------------------------------------------------
+    {
+      "name": "experimental-thing",
+      "description": "Not ready for prime time yet \u2014 set 'disabled' to false to enable.",
+      "disabled": true,
+      "source": {
+        "type": "github",
+        "owner": "octocat",
+        "repo": "experimental-skills"
+      },
+      "targets": [
+        "~/.config/claude/skills"
+      ]
+    }
+
+  ]
+}
