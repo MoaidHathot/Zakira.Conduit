@@ -378,6 +378,27 @@ export GITHUB_TOKEN=ghp_********************************
 
 For testing or to point at a different host, set `CONDUIT_GITHUB_API_BASE` (e.g. `http://127.0.0.1:5050/`).
 
+## Bundled agent skills
+
+This repository ships its own agent skill under [`skills/zakira-conduit/`](./skills/zakira-conduit/). Drop it into any [Agent Skills](https://agentskills.io/)-compatible client and the agent will know how to drive `conduit` &mdash; recognise the relevant requests, edit the manifest safely, and explain `sync` / `pin` / `status` output to you.
+
+You can &mdash; recursively &mdash; mirror it via `conduit` itself:
+
+```jsonc
+{
+  "name": "zakira-conduit",
+  "source": {
+    "type": "github",
+    "repo": "MoaidHathot/Zakira.Conduit",
+    "path": "skills/zakira-conduit",
+    "branch": "main"
+  },
+  "targets": ["~/.config/agents/skills"]
+}
+```
+
+See [`skills/README.md`](./skills/README.md) for details on the format and how to add more skills here.
+
 ---
 
 ## How it works
@@ -480,6 +501,8 @@ tests/
   Zakira.Conduit.Core.UnitTests/   # Pure unit tests, no network, no real fs except tmp.
   Zakira.Conduit.IntegrationTests/ # GitHub fetcher + synchronizer against an in-process HTTP mock.
   Zakira.Conduit.E2ETests/         # Spawns the built conduit.dll as a subprocess.
+skills/
+  zakira-conduit/        # An agent skill that teaches an agent how to drive conduit.
 example/
   conduit.json           # Runnable sample manifest covering every supported feature.
   local-skill-sample/    # On-disk content referenced by the sample's `local` entry.

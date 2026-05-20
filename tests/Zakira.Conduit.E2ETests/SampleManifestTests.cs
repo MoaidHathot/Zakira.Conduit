@@ -54,8 +54,10 @@ public sealed class SampleManifestTests
         result.StdOut.Should().Contain("local-skill-sample");
         result.StdOut.Should().Contain("local-skill-bundle");
         result.StdOut.Should().Contain("experimental-thing");
+        result.StdOut.Should().Contain("zakira-conduit");
         result.StdOut.Should().Contain("(disabled)");
         result.StdOut.Should().Contain("github:MoaidHathot/PowerReview");
         result.StdOut.Should().Contain("local:./local-skill-sample");
+        result.StdOut.Should().Contain("local:../skills/zakira-conduit");
     }
 }

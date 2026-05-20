@@ -82,6 +82,23 @@
       "targets": [
         "~/.config/claude/skills"
       ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 7) Mirror this repo's own bundled `zakira-conduit` skill into your
+    //    agent's skill folder. The skill teaches the agent how to use
+    //    `conduit` itself \u2014 the dog-food entry.
+    // ---------------------------------------------------------------------
+    {
+      "name": "zakira-conduit",
+      "description": "Mirror the bundled `zakira-conduit` agent skill from this very repo.",
+      "source": {
+        "type": "local",
+        "path": "../skills/zakira-conduit"
+      },
+      "targets": [
+        "~/.config/claude/skills"
+      ]
     }
 
   ]
