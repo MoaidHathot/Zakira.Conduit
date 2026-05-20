@@ -49,18 +49,21 @@ public sealed class LocalDirectorySkillSourceFetcher : ISkillSourceFetcher
 
         var contents = new List<FetchedContent>(effective.Count);
 
-        foreach (var rawPath in effective)
+        foreach (var spec in effective)
         {
-            var resolved = _pathResolver.Resolve(rawPath, context.ManifestDirectory);
+            var resolved = _pathResolver.Resolve(spec.Path, context.ManifestDirectory);
 
             if (!Directory.Exists(resolved))
             {
-                throw new LocalSourceNotFoundException($"Local source directory does not exist: '{resolved}' (resolved from '{rawPath}').", resolved);
+                throw new LocalSourceNotFoundException($"Local source directory does not exist: '{resolved}' (resolved from '{spec.Path}').", resolved);
             }
 
             _logger.LogInformation("Using local source: {Path}", resolved);
 
-            var suggestedName = effective.Count > 1 ? Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar)) : null;
+            // For multi-unit entries the suggested name is the spec's
+            // alias-or-basename; for single-unit it's left null so the
+            // synchronizer uses the entry name instead.
+            var suggestedName = effective.Count > 1 ? spec.ResolvedBasename : null;
             contents.Add(new FetchedContent(resolved, suggestedName));
         }
 

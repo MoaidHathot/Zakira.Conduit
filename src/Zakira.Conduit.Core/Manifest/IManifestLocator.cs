@@ -6,9 +6,11 @@ namespace Zakira.Conduit.Manifest;
 ///         <item><description>The explicit path provided by the caller.</description></item>
 ///         <item><description><c>$XDG_CONFIG_HOME/Zakira.Conduit/conduit.json</c>.</description></item>
 ///         <item><description><c>$HOME/.config/Zakira.Conduit/conduit.json</c> (XDG default fallback).</description></item>
-///         <item><description><c>%APPDATA%/Zakira.Conduit/conduit.json</c> (Windows fallback).</description></item>
 ///         <item><description><c>./conduit.json</c> (current working directory).</description></item>
 ///     </list>
+///     The same XDG-style resolution is used on every operating system, by
+///     design, so the discovery rules are identical for everyone collaborating
+///     on the same manifest.
 /// </summary>
 public interface IManifestLocator
 {

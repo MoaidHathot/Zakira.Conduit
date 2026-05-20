@@ -14,7 +14,8 @@ internal sealed class FakeFetcher : ISkillSourceFetcher
 
     public Func<ISkillSource, IReadOnlyDictionary<string, string>> ContentProvider { get; set; }
 
-    public int FetchCount { get; private set; }
+    private int _fetchCount;
+    public int FetchCount => Volatile.Read(ref _fetchCount);
 
     public FakeFetcher(string sourceKind = "github")
     {
@@ -24,7 +25,7 @@ internal sealed class FakeFetcher : ISkillSourceFetcher
 
     public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken cancellationToken = default)
     {
-        FetchCount++;
+        Interlocked.Increment(ref _fetchCount);
 
         var dir = Path.Combine(Path.GetTempPath(), "conduit-fake-fetch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);

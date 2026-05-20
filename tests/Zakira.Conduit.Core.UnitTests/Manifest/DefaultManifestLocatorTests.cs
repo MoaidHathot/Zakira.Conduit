@@ -54,27 +54,17 @@ public sealed class DefaultManifestLocatorTests
     }
 
     [Fact]
-    public void Adds_appdata_fallback_on_windows()
+    public void Appdata_is_never_included_even_on_windows()
     {
+        // We deliberately follow XDG everywhere and do NOT probe %APPDATA%
+        // so the discovery rules are identical across OSes.
         var env = new FakeEnvironment { IsWindows = true };
         env.Set("APPDATA", @"C:\Users\me\AppData\Roaming");
         var locator = new DefaultManifestLocator(env);
 
         var candidates = locator.EnumerateCandidates(explicitPath: null);
 
-        candidates.Should().Contain(@"C:\Users\me\AppData\Roaming\Zakira.Conduit\conduit.json");
-    }
-
-    [Fact]
-    public void Skips_appdata_on_non_windows()
-    {
-        var env = new FakeEnvironment { IsWindows = false };
-        env.Set("APPDATA", "/should/not/appear");
-        var locator = new DefaultManifestLocator(env);
-
-        var candidates = locator.EnumerateCandidates(explicitPath: null);
-
-        candidates.Should().NotContain(c => c.Contains("/should/not/appear", StringComparison.Ordinal));
+        candidates.Should().NotContain(c => c.Contains("AppData", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

@@ -220,4 +220,101 @@ public sealed class EndToEndSynchronizerTests
         File.ReadAllText(tmp.Combine("agent", "test-writer", "SKILL.md")).Should().Be("tests");
         Directory.Exists(tmp.Combine("agent", "house-bundle")).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task Etag_short_circuits_a_second_sync_against_an_unchanged_repo()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+
+        var payload = ZipballPayload.Build("acme-skills-etag", new Dictionary<string, string>
+        {
+            ["SKILL.md"] = "hello",
+        });
+        const string etag = "\"v1-payload-etag\"";
+        server.MapZipballWithEtag("acme", "skills", gitRef: null, payload, etag);
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "demo",
+                    Source = new GitHubSkillSource { Repo = "acme/skills" },
+                    Targets = [tmp.Combine("dest")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore(opts => opts.BaseAddress = server.BaseAddress);
+        var sync = services.BuildServiceProvider().GetRequiredService<IConduitSynchronizer>();
+
+        (await sync.SyncAsync(manifest, manifestPath, new SyncOptions())).Succeeded.Should().BeTrue();
+        server.Requests[0].IfNoneMatchHeader.Should().BeNullOrEmpty();
+
+        var firstRunRequests = server.Requests.Count;
+
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions());
+        report.Succeeded.Should().BeTrue();
+        report.Entries[0].Skipped.Should().BeTrue(because: "the server returned 304 and the target already exists");
+
+        server.Requests.Count.Should().Be(firstRunRequests + 1);
+        server.Requests[^1].IfNoneMatchHeader.Should().Be(etag);
+    }
+
+    [Fact]
+    public async Task Per_path_alias_renames_destination_directories_in_multi_path_entries()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+
+        var payload = ZipballPayload.Build("acme-skills-aliased", new Dictionary<string, string>
+        {
+            ["skills/code-review/SKILL.md"] = "review",
+            ["skills/test-writer/SKILL.md"] = "tests",
+        });
+        server.MapZipball("acme", "skills", gitRef: null, payload);
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "bundle",
+                    Source = new GitHubSkillSource
+                    {
+                        Repo = "acme/skills",
+                        Paths =
+                        [
+                            new PathSpec("skills/code-review", As: "review"),
+                            new PathSpec("skills/test-writer", As: "tests"),
+                        ],
+                    },
+                    Targets = [tmp.Combine("agent")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore(opts => opts.BaseAddress = server.BaseAddress);
+        var sync = services.BuildServiceProvider().GetRequiredService<IConduitSynchronizer>();
+
+        (await sync.SyncAsync(manifest, manifestPath, new SyncOptions())).Succeeded.Should().BeTrue();
+
+        File.ReadAllText(tmp.Combine("agent", "review", "SKILL.md")).Should().Be("review");
+        File.ReadAllText(tmp.Combine("agent", "tests", "SKILL.md")).Should().Be("tests");
+        Directory.Exists(tmp.Combine("agent", "code-review")).Should().BeFalse();
+        Directory.Exists(tmp.Combine("agent", "test-writer")).Should().BeFalse();
+    }
 }

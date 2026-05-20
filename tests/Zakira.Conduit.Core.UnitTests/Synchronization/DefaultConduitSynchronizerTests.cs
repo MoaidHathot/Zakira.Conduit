@@ -1,5 +1,7 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Zakira.Conduit.Core.UnitTests.TestHelpers;
+using Zakira.Conduit.DependencyInjection;
 using Zakira.Conduit.Manifest;
 using Zakira.Conduit.Mirroring;
 using Zakira.Conduit.Paths;
@@ -17,7 +19,7 @@ public sealed class DefaultConduitSynchronizerTests
         var mirror = new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance);
         var env = new FakeEnvironment();
         var resolver = new DefaultPathResolver(env);
-        var synchronizer = new DefaultConduitSynchronizer(registry, mirror, resolver, NullLogger<DefaultConduitSynchronizer>.Instance);
+        var synchronizer = new DefaultConduitSynchronizer(registry, mirror, resolver, new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance), NullLogger<DefaultConduitSynchronizer>.Instance);
         return (synchronizer, fetcher, env);
     }
 
@@ -150,7 +152,7 @@ public sealed class DefaultConduitSynchronizerTests
         var mirror = new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance);
         var env = new FakeEnvironment();
         var resolver = new DefaultPathResolver(env);
-        var sync = new DefaultConduitSynchronizer(registry, mirror, resolver, NullLogger<DefaultConduitSynchronizer>.Instance);
+        var sync = new DefaultConduitSynchronizer(registry, mirror, resolver, new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance), NullLogger<DefaultConduitSynchronizer>.Instance);
 
         var manifest = new ConduitManifest
         {
@@ -183,6 +185,7 @@ public sealed class DefaultConduitSynchronizerTests
             registry,
             new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance),
             new DefaultPathResolver(new FakeEnvironment()),
+            new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance),
             NullLogger<DefaultConduitSynchronizer>.Instance);
 
         var manifest = new ConduitManifest
@@ -197,10 +200,301 @@ public sealed class DefaultConduitSynchronizerTests
         var manifestPath = Path.Combine(tmp.Path, "conduit.json");
         await File.WriteAllTextAsync(manifestPath, "{}");
 
-        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { StopOnFirstError = true });
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { StopOnFirstError = true, MaxParallelism = 1 });
 
-        report.Entries.Should().HaveCount(1);
+        report.Entries.Should().HaveCount(2);
         report.Entries[0].Entry.Name.Should().Be("fails");
+        report.Entries[0].Succeeded.Should().BeFalse();
+        // The second entry should be present in the report (so the user knows
+        // it wasn't processed) but marked as skipped, not run.
+        report.Entries[1].Entry.Name.Should().Be("ok");
+        report.Entries[1].Skipped.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Skips_commit_pinned_entry_when_state_matches_and_targets_exist()
+    {
+        using var tmp = new TempDir();
+        var (sync, fetcher, _) = Build();
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var pinnedCommit = "abc1234567890abcdef1234567890abcdef12345";
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "pinned",
+                    Source = new GitHubSkillSource { Repo = "o/r", Commit = pinnedCommit },
+                    Targets = [tmp.Combine("target")],
+                }
+            ],
+        };
+
+        // First sync: should fetch + write state.
+        (await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 })).Succeeded.Should().BeTrue();
+        fetcher.FetchCount.Should().Be(1);
+
+        // Second sync: state matches, target dir exists -> skip without fetching.
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        report.Succeeded.Should().BeTrue();
+        report.Entries[0].Skipped.Should().BeTrue();
+        report.Entries[0].ResolvedRef.Should().Be(pinnedCommit);
+        fetcher.FetchCount.Should().Be(1, because: "the state file should have proven the entry is up-to-date");
+    }
+
+    [Fact]
+    public async Task Force_bypasses_the_state_based_skip()
+    {
+        using var tmp = new TempDir();
+        var (sync, fetcher, _) = Build();
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "pinned",
+                    Source = new GitHubSkillSource { Repo = "o/r", Commit = "abc1234567890abcdef1234567890abcdef12345" },
+                    Targets = [tmp.Combine("target")],
+                }
+            ],
+        };
+
+        await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        fetcher.FetchCount.Should().Be(1);
+
+        await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1, Force = true });
+
+        fetcher.FetchCount.Should().Be(2, because: "--force must invalidate the cached state and re-fetch");
+    }
+
+    [Fact]
+    public async Task Skip_invalidates_when_target_directory_has_been_deleted()
+    {
+        using var tmp = new TempDir();
+        var (sync, fetcher, _) = Build();
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "pinned",
+                    Source = new GitHubSkillSource { Repo = "o/r", Commit = "abc1234567890abcdef1234567890abcdef12345" },
+                    Targets = [tmp.Combine("target")],
+                }
+            ],
+        };
+
+        await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        fetcher.FetchCount.Should().Be(1);
+
+        Directory.Delete(tmp.Combine("target"), recursive: true);
+
+        await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+
+        fetcher.FetchCount.Should().Be(2, because: "missing targets should invalidate the cache and trigger a fresh fetch");
+        Directory.Exists(tmp.Combine("target", "pinned")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Skips_local_source_when_content_hash_matches_and_targets_exist()
+    {
+        using var tmp = new TempDir();
+
+        var sourceDir = tmp.Combine("src");
+        Directory.CreateDirectory(sourceDir);
+        await File.WriteAllTextAsync(Path.Combine(sourceDir, "SKILL.md"), "v1");
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "local",
+                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Targets = [tmp.Combine("dest")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore();
+        var sync = services.BuildServiceProvider().GetRequiredService<IConduitSynchronizer>();
+
+        (await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 })).Succeeded.Should().BeTrue();
+        File.ReadAllText(tmp.Combine("dest", "local", "SKILL.md")).Should().Be("v1");
+
+        // Second run with no source changes should be a no-op (skipped).
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        report.Entries[0].Skipped.Should().BeTrue(because: "the local source hash should match and the target should still exist");
+    }
+
+    [Fact]
+    public async Task Re_syncs_local_source_when_a_file_inside_it_changes()
+    {
+        using var tmp = new TempDir();
+
+        var sourceDir = tmp.Combine("src");
+        Directory.CreateDirectory(sourceDir);
+        var skillFile = Path.Combine(sourceDir, "SKILL.md");
+        await File.WriteAllTextAsync(skillFile, "v1");
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "local",
+                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Targets = [tmp.Combine("dest")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore();
+        var sync = services.BuildServiceProvider().GetRequiredService<IConduitSynchronizer>();
+
+        await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        File.ReadAllText(tmp.Combine("dest", "local", "SKILL.md")).Should().Be("v1");
+
+        // Edit the source. Ensure the LastWriteTimeUtc moves forward enough
+        // for the hash to differ (Windows filesystem timestamp resolution).
+        await Task.Delay(50);
+        await File.WriteAllTextAsync(skillFile, "v2");
+
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        report.Succeeded.Should().BeTrue();
+        report.Entries[0].Skipped.Should().BeFalse(because: "a content change must invalidate the local hash and trigger a re-mirror");
+
+        File.ReadAllText(tmp.Combine("dest", "local", "SKILL.md")).Should().Be("v2");
+    }
+
+    [Fact]
+    public async Task Re_syncs_local_source_when_a_target_was_deleted_even_if_source_unchanged()
+    {
+        using var tmp = new TempDir();
+
+        var sourceDir = tmp.Combine("src");
+        Directory.CreateDirectory(sourceDir);
+        await File.WriteAllTextAsync(Path.Combine(sourceDir, "SKILL.md"), "x");
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "local",
+                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Targets = [tmp.Combine("dest")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore();
+        var sync = services.BuildServiceProvider().GetRequiredService<IConduitSynchronizer>();
+
+        await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+
+        Directory.Delete(tmp.Combine("dest", "local"), recursive: true);
+
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 });
+        report.Succeeded.Should().BeTrue();
+        report.Entries[0].Skipped.Should().BeFalse(because: "even with an unchanged source, missing targets must invalidate the skip");
+        File.Exists(tmp.Combine("dest", "local", "SKILL.md")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Parallel_sync_processes_many_entries_concurrently()
+    {
+        using var tmp = new TempDir();
+        var (sync, fetcher, _) = Build();
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var entries = Enumerable.Range(0, 8).Select(i => new ConduitEntry
+        {
+            Name = $"e{i}",
+            Source = new GitHubSkillSource { Repo = $"o/r{i}" },
+            Targets = [tmp.Combine("t")],
+        }).ToArray();
+
+        var manifest = new ConduitManifest { Entries = entries };
+
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 4 });
+
+        report.Succeeded.Should().BeTrue();
+        report.Entries.Should().HaveCount(8);
+        report.Entries.Select(e => e.Entry.Name).Should().Equal(entries.Select(e => e.Name));
+        fetcher.FetchCount.Should().Be(8);
+    }
+
+    [Fact]
+    public async Task Per_target_alias_overrides_entry_name_in_destination()
+    {
+        using var tmp = new TempDir();
+        var (sync, fetcher, _) = Build();
+
+        fetcher.ContentProvider = _ => new Dictionary<string, string>
+        {
+            ["SKILL.md"] = "content",
+        };
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "originalName",
+                    Source = new GitHubSkillSource { Repo = "o/r" },
+                    Targets =
+                    [
+                        new PathSpec(tmp.Combine("t1")),                                  // no alias -> originalName
+                        new PathSpec(tmp.Combine("t2"), As: "renamed"),                   // alias  -> renamed
+                    ],
+                },
+            ],
+        };
+
+        (await sync.SyncAsync(manifest, manifestPath, new SyncOptions { MaxParallelism = 1 })).Succeeded.Should().BeTrue();
+
+        File.ReadAllText(tmp.Combine("t1", "originalName", "SKILL.md")).Should().Be("content");
+        File.ReadAllText(tmp.Combine("t2", "renamed", "SKILL.md")).Should().Be("content");
+        Directory.Exists(tmp.Combine("t2", "originalName")).Should().BeFalse();
     }
 
     [Fact]
@@ -221,6 +515,7 @@ public sealed class DefaultConduitSynchronizerTests
             registry,
             new AtomicDirectoryMirror(Microsoft.Extensions.Logging.Abstractions.NullLogger<AtomicDirectoryMirror>.Instance),
             new DefaultPathResolver(new FakeEnvironment()),
+            new JsonConduitStateStore(Microsoft.Extensions.Logging.Abstractions.NullLogger<JsonConduitStateStore>.Instance),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DefaultConduitSynchronizer>.Instance);
 
         var manifestPath = tmp.Combine("conduit.json");

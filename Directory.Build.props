@@ -39,8 +39,8 @@
     <Copyright>Copyright (c) Zakira contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageProjectUrl>https://github.com/anomalyco/Zakira.Conduit</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/anomalyco/Zakira.Conduit</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/MoaidHathot/Zakira.Conduit</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MoaidHathot/Zakira.Conduit</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>

@@ -65,10 +65,27 @@ public static class ManifestValidator
         {
             for (var t = 0; t < entry.Targets.Count; t++)
             {
-                if (string.IsNullOrWhiteSpace(entry.Targets[t]))
+                var target = entry.Targets[t];
+                if (target is null || string.IsNullOrWhiteSpace(target.Path))
                 {
-                    errors.Add($"{prefix}.targets[{t}] must be a non-empty string.");
+                    errors.Add($"{prefix}.targets[{t}] must be a non-empty path.");
                 }
+            }
+
+            // Per-target `as` aliases only make sense when the entry produces
+            // exactly one content unit; otherwise basename-derived destinations
+            // would silently override the alias.
+            var aliasedTargets = entry.Targets.Count(t => t is not null && !string.IsNullOrWhiteSpace(t.As));
+            var sourceProducesMultiple = entry.Source switch
+            {
+                GitHubSkillSource gh => gh.EffectivePaths.Count > 1,
+                LocalDirectorySkillSource local => local.EffectivePaths.Count > 1,
+                _ => false,
+            };
+
+            if (aliasedTargets > 0 && sourceProducesMultiple)
+            {
+                errors.Add($"{prefix}.targets: per-target 'as' aliases are not allowed on multi-path entries (the source produces multiple destinations).");
             }
         }
 
@@ -99,10 +116,10 @@ public static class ManifestValidator
             errors.Add($"{prefix}.source.repo: {parseError}");
         }
 
-        if (!string.IsNullOrEmpty(source.Commit) && !string.IsNullOrEmpty(source.Branch))
-        {
-            errors.Add($"{prefix}.source: 'commit' and 'branch' are mutually exclusive.");
-        }
+        // `branch` and `commit` may coexist: when both are set, `branch` is the
+        // tracking intent (used by `conduit pin` / `conduit update`) and
+        // `commit` is the snapshot the synchronizer actually fetches. Pinning
+        // is therefore non-lossy: you keep the branch metadata for later refresh.
 
         if (source.Path is not null && source.Paths is { Count: > 0 })
         {
@@ -130,10 +147,10 @@ public static class ManifestValidator
     /// <summary>
     ///     Common validation for an effective list of paths: non-empty entries,
     ///     no <c>..</c> for repo-relative paths, no leading <c>/</c> for
-    ///     repo-relative paths, and (when count &gt; 1) unique basenames so
-    ///     destination directories never collide.
+    ///     repo-relative paths, and (when count &gt; 1) unique resolved
+    ///     basenames (alias-or-derived) so destination directories never collide.
     /// </summary>
-    private static void ValidateSubPaths(IReadOnlyList<string> paths, string prefix, bool requireRepoRelative, List<string> errors)
+    private static void ValidateSubPaths(IReadOnlyList<PathSpec> paths, string prefix, bool requireRepoRelative, List<string> errors)
     {
         if (paths.Count == 0)
         {
@@ -144,16 +161,18 @@ public static class ManifestValidator
 
         for (var i = 0; i < paths.Count; i++)
         {
-            var p = paths[i];
+            var spec = paths[i];
             var slot = paths.Count == 1 && prefix.EndsWith(".source", StringComparison.Ordinal)
                 ? $"{prefix}.path"
                 : $"{prefix}.paths[{i}]";
 
-            if (string.IsNullOrWhiteSpace(p))
+            if (spec is null || string.IsNullOrWhiteSpace(spec.Path))
             {
-                errors.Add($"{slot} must be a non-empty string.");
+                errors.Add($"{slot} must be a non-empty path.");
                 continue;
             }
+
+            var p = spec.Path;
 
             if (requireRepoRelative)
             {
@@ -168,17 +187,14 @@ public static class ManifestValidator
                 }
             }
 
-            // Basename collision check across multiple paths.
+            // Basename collision check across multiple paths. Honors any
+            // explicit `as` alias, since aliases become the destination name.
             if (paths.Count > 1)
             {
-                var normalized = p.Replace('\\', '/').TrimEnd('/');
-                var slashIndex = normalized.LastIndexOf('/');
-                var basename = slashIndex < 0 ? normalized : normalized[(slashIndex + 1)..];
-                basename = basename.Trim();
-
+                var basename = spec.ResolvedBasename.Trim();
                 if (!string.IsNullOrEmpty(basename) && !seen.Add(basename))
                 {
-                    errors.Add($"{prefix}.paths: multiple entries share the basename '{basename}', which would collide in the target directory.");
+                    errors.Add($"{prefix}.paths: multiple entries share the destination name '{basename}', which would collide in the target directory.");
                 }
             }
         }

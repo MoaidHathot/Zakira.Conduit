@@ -62,6 +62,34 @@ internal sealed class MockGitHubServer : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    ///     Convenience helper: serve a zipball with a fixed ETag. When the
+    ///     client sends a matching <c>If-None-Match</c>, replies with 304 and
+    ///     no body. Returns the same instance for chaining.
+    /// </summary>
+    public MockGitHubServer MapZipballWithEtag(string owner, string repo, string? gitRef, byte[] payload, string etag)
+    {
+        var path = "/repos/" + owner + "/" + repo + "/zipball" + (gitRef is null ? string.Empty : "/" + Uri.EscapeDataString(gitRef));
+        return Map(path, async ctx =>
+        {
+            var ifNoneMatch = ctx.Request.Headers["If-None-Match"];
+            if (!string.IsNullOrEmpty(ifNoneMatch) && string.Equals(ifNoneMatch, etag, StringComparison.Ordinal))
+            {
+                ctx.Response.StatusCode = (int)HttpStatusCode.NotModified;
+                ctx.Response.Headers["ETag"] = etag;
+                ctx.Response.Close();
+                return;
+            }
+
+            ctx.Response.StatusCode = (int)HttpStatusCode.OK;
+            ctx.Response.ContentType = "application/zip";
+            ctx.Response.ContentLength64 = payload.LongLength;
+            ctx.Response.Headers["ETag"] = etag;
+            await ctx.Response.OutputStream.WriteAsync(payload).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+    }
+
     private async Task ListenLoopAsync()
     {
         while (!_cts.IsCancellationRequested)
@@ -88,7 +116,8 @@ internal sealed class MockGitHubServer : IAsyncDisposable
                     Path: path,
                     AuthorizationHeader: context.Request.Headers["Authorization"],
                     UserAgentHeader: context.Request.UserAgent,
-                    AcceptHeader: context.Request.Headers["Accept"]));
+                    AcceptHeader: context.Request.Headers["Accept"],
+                    IfNoneMatchHeader: context.Request.Headers["If-None-Match"]));
 
                 foreach (var (pattern, handler) in _routes)
                 {
@@ -146,7 +175,7 @@ internal sealed class MockGitHubServer : IAsyncDisposable
     }
 }
 
-internal sealed record RecordedRequest(string Method, string Path, string? AuthorizationHeader, string? UserAgentHeader, string? AcceptHeader);
+internal sealed record RecordedRequest(string Method, string Path, string? AuthorizationHeader, string? UserAgentHeader, string? AcceptHeader, string? IfNoneMatchHeader);
 
 /// <summary>
 ///     Helpers to build a GitHub-style zipball in memory.

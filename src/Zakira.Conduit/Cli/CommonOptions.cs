@@ -31,4 +31,11 @@ internal static class CommonOptions
         Description = "Shortcut for --verbosity quiet.",
         Recursive = true,
     };
+
+    public static Option<OutputFormat> Output { get; } = new("--output", "-o")
+    {
+        Description = "Output format: text (human-friendly, default) or json (machine-readable, stdout-only).",
+        Recursive = true,
+        DefaultValueFactory = _ => OutputFormat.Text,
+    };
 }

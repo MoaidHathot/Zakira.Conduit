@@ -32,6 +32,12 @@ public static class Program
         serviceCollection.AddLogging(builder =>
         {
             builder.SetMinimumLevel(verbosity);
+
+            // Route ALL log lines to stderr regardless of level, so stdout
+            // is reserved for the command's primary output (reports, JSON,
+            // listings). This keeps stdout pipe-clean for scripting.
+            builder.AddConsole(opts => opts.LogToStandardErrorThreshold = LogLevel.Trace);
+
             builder.AddSimpleConsole(opts =>
             {
                 opts.SingleLine = true;
@@ -43,11 +49,16 @@ public static class Program
 
         serviceCollection.AddConduitCore();
 
+        serviceCollection.AddSingleton(_ => ConsoleStyle.DetectFromEnvironment());
+
         // Command handlers.
         serviceCollection.AddSingleton<SyncCommandHandler>();
         serviceCollection.AddSingleton<ListCommandHandler>();
         serviceCollection.AddSingleton<ValidateCommandHandler>();
         serviceCollection.AddSingleton<InitCommandHandler>();
+        serviceCollection.AddSingleton<PinUpdateCommandHandler>();
+        serviceCollection.AddSingleton<WatchCommandHandler>();
+        serviceCollection.AddSingleton<StatusCommandHandler>();
 
         return serviceCollection.BuildServiceProvider();
     }

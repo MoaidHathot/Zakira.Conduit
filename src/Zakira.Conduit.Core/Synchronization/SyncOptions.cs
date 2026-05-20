@@ -24,4 +24,17 @@ public sealed record SyncOptions
     ///     attempted and the overall result is degraded.
     /// </summary>
     public bool StopOnFirstError { get; init; }
+
+    /// <summary>
+    ///     When <see langword="true"/>, ignores any cached state: every entry
+    ///     is re-fetched and re-mirrored even if the state file says it's
+    ///     already up-to-date. Useful for verifying targets after manual edits.
+    /// </summary>
+    public bool Force { get; init; }
+
+    /// <summary>
+    ///     Maximum number of entries processed concurrently. Defaults to <c>4</c>.
+    ///     Set to <c>1</c> to force sequential execution.
+    /// </summary>
+    public int MaxParallelism { get; init; } = 4;
 }

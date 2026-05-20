@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <RootNamespace>Zakira.Conduit.E2ETests</RootNamespace>
@@ -24,13 +24,11 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="AwesomeAssertions" />
-    <PackageReference Include="Verify.Xunit" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="AwesomeAssertions" />
-    <Using Include="VerifyXunit" />
   </ItemGroup>
 
 </Project>

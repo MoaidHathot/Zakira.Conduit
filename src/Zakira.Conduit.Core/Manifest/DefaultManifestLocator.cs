@@ -38,7 +38,7 @@ public sealed class DefaultManifestLocator : IManifestLocator
     /// <inheritdoc />
     public IReadOnlyList<string> EnumerateCandidates(string? explicitPath)
     {
-        var list = new List<string>(capacity: 5);
+        var list = new List<string>(capacity: 3);
 
         if (!string.IsNullOrWhiteSpace(explicitPath))
         {
@@ -49,6 +49,11 @@ public sealed class DefaultManifestLocator : IManifestLocator
             return list;
         }
 
+        // Follow the XDG Base Directory Specification on every platform: an
+        // explicit XDG_CONFIG_HOME wins, otherwise the conventional fallback
+        // is the user's home directory + `.config`. We intentionally do NOT
+        // also probe Windows-native locations (%APPDATA%, %LOCALAPPDATA%)
+        // because mixing conventions made it ambiguous which file would win.
         var xdg = _environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         if (!string.IsNullOrWhiteSpace(xdg))
         {
@@ -59,15 +64,6 @@ public sealed class DefaultManifestLocator : IManifestLocator
         if (!string.IsNullOrWhiteSpace(home))
         {
             list.Add(Path.Combine(home, ".config", ManifestNames.ConfigDirectoryName, ManifestNames.DefaultFileName));
-        }
-
-        if (_environment.IsWindows)
-        {
-            var appData = _environment.GetEnvironmentVariable("APPDATA");
-            if (!string.IsNullOrWhiteSpace(appData))
-            {
-                list.Add(Path.Combine(appData, ManifestNames.ConfigDirectoryName, ManifestNames.DefaultFileName));
-            }
         }
 
         list.Add(Path.Combine(_environment.GetCurrentDirectory(), ManifestNames.DefaultFileName));

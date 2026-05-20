@@ -20,6 +20,7 @@ internal static class CommandTreeBuilder
         root.Options.Add(CommonOptions.Verbosity);
         root.Options.Add(CommonOptions.Verbose);
         root.Options.Add(CommonOptions.Quiet);
+        root.Options.Add(CommonOptions.Output);
 
         CommonOptions.Manifest.Recursive = true;
 
@@ -27,6 +28,10 @@ internal static class CommandTreeBuilder
         root.Subcommands.Add(BuildListCommand(services));
         root.Subcommands.Add(BuildValidateCommand(services));
         root.Subcommands.Add(BuildInitCommand(services));
+        root.Subcommands.Add(BuildPinOrUpdateCommand(services, "pin", "Resolve every github entry's tracked branch to its current SHA and write the result into the manifest's 'commit' field."));
+        root.Subcommands.Add(BuildPinOrUpdateCommand(services, "update", "Alias of 'pin'. Refresh each pinned entry to the latest SHA on its tracked branch."));
+        root.Subcommands.Add(BuildWatchCommand(services));
+        root.Subcommands.Add(BuildStatusCommand(services));
 
         // Default action when the user runs `conduit` with no subcommand: show help.
         root.SetAction(parseResult =>
@@ -58,10 +63,23 @@ internal static class CommandTreeBuilder
             Description = "Abort the run on the first failing entry instead of attempting subsequent ones.",
         };
 
+        var forceOption = new Option<bool>("--force", "-f")
+        {
+            Description = "Ignore the cached state file and re-fetch/re-mirror every entry, even if it appears up-to-date.",
+        };
+
+        var parallelOption = new Option<int>("--parallel", "-p")
+        {
+            Description = "Maximum number of entries to sync in parallel. Default: 4. Use 1 to force sequential execution.",
+            DefaultValueFactory = _ => 4,
+        };
+
         var command = new Command("sync", "Synchronize manifest entries into their target directories.");
         command.Options.Add(entryOption);
         command.Options.Add(dryRunOption);
         command.Options.Add(stopOnFirstErrorOption);
+        command.Options.Add(forceOption);
+        command.Options.Add(parallelOption);
 
         command.SetAction((parseResult, cancellationToken) =>
         {
@@ -71,6 +89,9 @@ internal static class CommandTreeBuilder
                 entries: parseResult.GetValue(entryOption) ?? Array.Empty<string>(),
                 dryRun: parseResult.GetValue(dryRunOption),
                 stopOnFirstError: parseResult.GetValue(stopOnFirstErrorOption),
+                force: parseResult.GetValue(forceOption),
+                maxParallelism: parseResult.GetValue(parallelOption),
+                output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });
 
@@ -86,6 +107,7 @@ internal static class CommandTreeBuilder
             var handler = services.GetRequiredService<ListCommandHandler>();
             return handler.InvokeAsync(
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });
 
@@ -101,6 +123,7 @@ internal static class CommandTreeBuilder
             var handler = services.GetRequiredService<ValidateCommandHandler>();
             return handler.InvokeAsync(
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });
 
@@ -114,8 +137,14 @@ internal static class CommandTreeBuilder
             Description = "Overwrite an existing manifest if one is present at the target path.",
         };
 
+        var interactiveOption = new Option<bool>("--interactive", "-i")
+        {
+            Description = "Walk through prompts to populate the first entry instead of writing the placeholder template.",
+        };
+
         var command = new Command("init", "Create a starter conduit.json manifest. Writes to --manifest, or to $XDG_CONFIG_HOME/Zakira.Conduit/conduit.json.");
         command.Options.Add(forceOption);
+        command.Options.Add(interactiveOption);
 
         command.SetAction((parseResult, cancellationToken) =>
         {
@@ -123,6 +152,87 @@ internal static class CommandTreeBuilder
             return handler.InvokeAsync(
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
                 force: parseResult.GetValue(forceOption),
+                interactive: parseResult.GetValue(interactiveOption),
+                cancellationToken: cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static Command BuildPinOrUpdateCommand(IServiceProvider services, string verb, string description)
+    {
+        var entryOption = new Option<string[]>("--entry", "-e")
+        {
+            Description = "Limit the operation to the named entry (repeatable).",
+            AllowMultipleArgumentsPerToken = true,
+        };
+
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Report what would change, without rewriting the manifest.",
+        };
+
+        var command = new Command(verb, description);
+        command.Options.Add(entryOption);
+        command.Options.Add(dryRunOption);
+
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var handler = services.GetRequiredService<PinUpdateCommandHandler>();
+            return handler.InvokeAsync(
+                verb: verb,
+                manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                entries: parseResult.GetValue(entryOption) ?? Array.Empty<string>(),
+                dryRun: parseResult.GetValue(dryRunOption),
+                output: parseResult.GetValue(CommonOptions.Output),
+                cancellationToken: cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static Command BuildWatchCommand(IServiceProvider services)
+    {
+        var debounceOption = new Option<int>("--debounce")
+        {
+            Description = "Time in milliseconds to coalesce burst writes to the manifest. Default: 250.",
+            DefaultValueFactory = _ => 250,
+        };
+
+        var parallelOption = new Option<int>("--parallel", "-p")
+        {
+            Description = "Maximum number of entries to sync in parallel for each re-run. Default: 4.",
+            DefaultValueFactory = _ => 4,
+        };
+
+        var command = new Command("watch", "Run an initial sync, then re-sync whenever the manifest changes on disk. Ctrl+C to stop.");
+        command.Options.Add(debounceOption);
+        command.Options.Add(parallelOption);
+
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var handler = services.GetRequiredService<WatchCommandHandler>();
+            return handler.InvokeAsync(
+                manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                debounceMs: parseResult.GetValue(debounceOption),
+                maxParallelism: parseResult.GetValue(parallelOption),
+                output: parseResult.GetValue(CommonOptions.Output),
+                cancellationToken: cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static Command BuildStatusCommand(IServiceProvider services)
+    {
+        var command = new Command("status", "Show what each manifest entry was last synced to (no network IO).");
+
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var handler = services.GetRequiredService<StatusCommandHandler>();
+            return handler.InvokeAsync(
+                manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });
 

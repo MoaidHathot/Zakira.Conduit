@@ -90,6 +90,43 @@ public sealed class GitHubArchiveDownloaderTests
         await act.Should().ThrowAsync<GitHubDownloadException>();
     }
 
+    [Fact]
+    public async Task Sends_if_none_match_header_when_etag_is_provided()
+    {
+        await using var server = new MockGitHubServer();
+        var payload = ZipballPayload.Build("o-r-c", new Dictionary<string, string> { ["a"] = "b" });
+        const string etag = "\"abc123\"";
+        server.MapZipballWithEtag("o", "r", gitRef: null, payload, etag);
+
+        var downloader = BuildDownloader(server);
+        using var ms = new MemoryStream();
+
+        var result = await downloader.DownloadAsync("o", "r", null, ms, ifNoneMatchEtag: etag);
+
+        result.NotModified.Should().BeTrue();
+        result.Etag.Should().Be(etag);
+        ms.Length.Should().Be(0, because: "the body must not be written when the server returns 304");
+        server.Requests.Should().ContainSingle(r => r.IfNoneMatchHeader == etag);
+    }
+
+    [Fact]
+    public async Task Returns_etag_from_response_on_200()
+    {
+        await using var server = new MockGitHubServer();
+        var payload = ZipballPayload.Build("o-r-c", new Dictionary<string, string> { ["a"] = "b" });
+        const string etag = "\"first-tag\"";
+        server.MapZipballWithEtag("o", "r", gitRef: null, payload, etag);
+
+        var downloader = BuildDownloader(server);
+        using var ms = new MemoryStream();
+
+        var result = await downloader.DownloadAsync("o", "r", null, ms);
+
+        result.NotModified.Should().BeFalse();
+        result.Etag.Should().Be(etag);
+        ms.Length.Should().Be(payload.LongLength);
+    }
+
     private static IGitHubArchiveDownloader BuildDownloader(MockGitHubServer server, string? token = null, long maxSizeBytes = 256 * 1024 * 1024)
     {
         var services = new ServiceCollection();

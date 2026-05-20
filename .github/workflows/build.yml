@@ -1,0 +1,109 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # global.json pins the SDK; setup-dotnet honors it.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Show .NET version
+        run: dotnet --info
+
+      - name: Restore
+        run: dotnet restore Zakira.Conduit.slnx
+
+      - name: Build
+        run: dotnet build Zakira.Conduit.slnx --configuration Release --no-restore --nologo
+
+      - name: Test
+        run: >
+          dotnet test Zakira.Conduit.slnx
+          --configuration Release
+          --no-build
+          --nologo
+          --logger "trx;LogFileName=test-results.trx"
+          --logger "console;verbosity=normal"
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults/**/*
+          if-no-files-found: ignore
+
+      # Coverage is only summarised on a single OS to avoid noise: the totals
+      # are deterministic enough that one run is representative.
+      - name: Generate coverage summary
+        if: matrix.os == 'ubuntu-latest' && always()
+        uses: danielpalme/ReportGenerator-GitHub-Action@5.4.4
+        with:
+          reports: TestResults/**/coverage.cobertura.xml
+          targetdir: ${{ runner.temp }}/coverage
+          reporttypes: 'MarkdownSummaryGithub;Cobertura;HtmlSummary'
+
+      - name: Add coverage to job summary
+        if: matrix.os == 'ubuntu-latest' && always()
+        shell: bash
+        run: |
+          if [[ -f "${{ runner.temp }}/coverage/SummaryGithub.md" ]]; then
+            echo "## Coverage" >> $GITHUB_STEP_SUMMARY
+            cat "${{ runner.temp }}/coverage/SummaryGithub.md" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Coverage summary not generated (no coverage files found)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload coverage report
+        if: matrix.os == 'ubuntu-latest' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ${{ runner.temp }}/coverage/**/*
+          if-no-files-found: ignore
+
+  pack:
+    # The pack job is informational only - it proves a release build can pack.
+    # Pushes to nuget.org are run manually with ./pack.ps1 -Push.
+    name: pack (dry-run)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Pack
+        run: dotnet pack Zakira.Conduit.slnx --configuration Release --output ./artifacts --nologo
+
+      - name: Upload nupkgs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkgs
+          path: artifacts/*.*nupkg
+          if-no-files-found: error

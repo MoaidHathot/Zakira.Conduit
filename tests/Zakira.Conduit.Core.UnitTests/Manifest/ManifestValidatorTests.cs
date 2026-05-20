@@ -94,7 +94,7 @@ public sealed class ManifestValidatorTests
     }
 
     [Fact]
-    public void Commit_and_branch_are_mutually_exclusive()
+    public void Commit_and_branch_may_coexist_as_intent_and_snapshot()
     {
         var manifest = new ConduitManifest
         {
@@ -109,7 +109,10 @@ public sealed class ManifestValidatorTests
             ],
         };
 
-        ManifestValidator.Validate(manifest).Should().ContainMatch("*mutually exclusive*");
+        // Commit + branch is no longer rejected: branch records the tracking
+        // intent that `conduit pin` / `conduit update` resolve, commit is the
+        // current snapshot the synchronizer fetches.
+        ManifestValidator.Validate(manifest).Should().BeEmpty();
     }
 
     [Fact]
@@ -166,7 +169,7 @@ public sealed class ManifestValidatorTests
             ],
         };
 
-        ManifestValidator.Validate(manifest).Should().ContainMatch("*basename 'foo'*");
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*destination name 'foo'*");
     }
 
     [Fact]
@@ -185,7 +188,7 @@ public sealed class ManifestValidatorTests
             ],
         };
 
-        ManifestValidator.Validate(manifest).Should().ContainMatch("*basename 'skill'*");
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*destination name 'skill'*");
     }
 
     [Theory]

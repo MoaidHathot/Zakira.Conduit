@@ -33,7 +33,13 @@ public sealed class GitHubArchiveDownloader : IGitHubArchiveDownloader
     }
 
     /// <inheritdoc />
-    public async Task DownloadAsync(string owner, string repo, string? gitRef, Stream destinationStream, CancellationToken cancellationToken = default)
+    public async Task<GitHubDownloadResult> DownloadAsync(
+        string owner,
+        string repo,
+        string? gitRef,
+        Stream destinationStream,
+        string? ifNoneMatchEtag = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
@@ -52,9 +58,20 @@ public sealed class GitHubArchiveDownloader : IGitHubArchiveDownloader
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.Token);
         }
 
-        _logger.LogDebug("GET {Uri}", requestUri);
+        if (!string.IsNullOrWhiteSpace(ifNoneMatchEtag) && EntityTagHeaderValue.TryParse(ifNoneMatchEtag, out var etagHeader))
+        {
+            request.Headers.IfNoneMatch.Add(etagHeader);
+        }
+
+        _logger.LogDebug("GET {Uri} (If-None-Match={IfNoneMatch})", requestUri, ifNoneMatchEtag ?? "<none>");
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+
+        if (response.StatusCode == HttpStatusCode.NotModified)
+        {
+            _logger.LogDebug("304 Not Modified for '{Slug}'", $"{owner}/{repo}");
+            return new GitHubDownloadResult(NotModified: true, Etag: ifNoneMatchEtag, ResolvedRef: null);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
@@ -88,6 +105,13 @@ public sealed class GitHubArchiveDownloader : IGitHubArchiveDownloader
 
             await destinationStream.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
         }
+
+        // ResolvedRef is filled in by the fetcher after extraction (it parses
+        // the zipball's top-level folder name to recover the short SHA). We
+        // could also try to read it from the Content-Disposition header here,
+        // but that's GitHub-implementation-specific and brittle.
+        var etag = response.Headers.ETag?.Tag;
+        return new GitHubDownloadResult(NotModified: false, Etag: etag, ResolvedRef: null);
     }
 
     private static async Task<string> SafeReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)

@@ -10,6 +10,52 @@ namespace Zakira.Conduit.Sources.GitHub;
 internal static class ZipballExtractor
 {
     /// <summary>
+    ///     Reads only the top-level folder name out of <paramref name="archive"/>
+    ///     without extracting anything. Returns the short SHA suffix (everything
+    ///     after the last <c>-</c> in the folder name) when GitHub's naming
+    ///     convention is recognised, otherwise <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    ///     Used by the fetcher to record a precise <c>resolvedRef</c> in the
+    ///     state file even when the caller asked for a branch.
+    /// </remarks>
+    public static string? PeekResolvedShortSha(Stream archive)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+
+        using var zip = new ZipArchive(archive, ZipArchiveMode.Read, leaveOpen: true);
+        var topFolder = zip.Entries
+            .Select(e => e.FullName)
+            .Where(n => n.Length > 0)
+            .Select(n =>
+            {
+                var slash = n.IndexOf('/', StringComparison.Ordinal);
+                return slash < 0 ? n : n[..slash];
+            })
+            .FirstOrDefault();
+
+        if (string.IsNullOrEmpty(topFolder))
+        {
+            return null;
+        }
+
+        var lastDash = topFolder.LastIndexOf('-');
+        if (lastDash < 0 || lastDash == topFolder.Length - 1)
+        {
+            return null;
+        }
+
+        var suffix = topFolder[(lastDash + 1)..];
+        // GitHub uses 7+ hex chars for the short SHA; sanity-check the shape.
+        if (suffix.Length < 7 || !suffix.All(c => Uri.IsHexDigit(c)))
+        {
+            return null;
+        }
+
+        return suffix;
+    }
+
+    /// <summary>
     ///     Extracts <paramref name="archive"/> into <paramref name="destinationDirectory"/>.
     ///     When <paramref name="subPath"/> is non-empty, only entries inside
     ///     that sub-path are extracted, and the sub-path becomes the root of

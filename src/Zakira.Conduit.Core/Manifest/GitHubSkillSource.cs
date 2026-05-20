@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json.Serialization;
 
 namespace Zakira.Conduit.Manifest;
@@ -14,6 +15,12 @@ public sealed record GitHubSkillSource : ISkillSource
     ///     The JSON discriminator value for this source kind (<c>"github"</c>).
     /// </summary>
     public const string TypeDiscriminator = "github";
+
+    // Process-wide cache of parsed repo references. Static so it stays out of
+    // record equality (which would otherwise compare instance fields too).
+    // Unique-string cardinality is naturally bounded by the number of repos a
+    // user references; no eviction needed.
+    private static readonly ConcurrentDictionary<string, (string Owner, string Name)> RepoCache = new(StringComparer.Ordinal);
 
     /// <summary>
     ///     The repository identifier. Accepts a slug (<c>owner/repo</c>),
@@ -32,18 +39,20 @@ public sealed record GitHubSkillSource : ISkillSource
     public string? Path { get; init; }
 
     /// <summary>
-    ///     Optional list of sub-paths inside the repository to mirror.
+    ///     Optional list of sub-paths inside the repository to mirror. Each
+    ///     element may be a string (the common case) or an object with
+    ///     <c>path</c> + optional <c>as</c> alias.
     ///     When <see langword="null"/> / empty (and <see cref="Path"/> is
     ///     also null) the entire repository is mirrored.
     ///     <para>
     ///         <list type="bullet">
     ///             <item><description>If exactly one path resolves, it is mirrored to <c>&lt;target&gt;/&lt;entry.name&gt;/</c>.</description></item>
-    ///             <item><description>If two or more paths resolve, each is mirrored to <c>&lt;target&gt;/&lt;basename(path)&gt;/</c>; the entry name drops out of the destination.</description></item>
+    ///             <item><description>If two or more paths resolve, each is mirrored to <c>&lt;target&gt;/&lt;basename(path)&gt;/</c> (or its alias when supplied); the entry name drops out of the destination.</description></item>
     ///         </list>
     ///     </para>
     /// </summary>
     [JsonPropertyName("paths")]
-    public IReadOnlyList<string>? Paths { get; init; }
+    public IReadOnlyList<PathSpec>? Paths { get; init; }
 
     /// <summary>
     ///     Optional commit SHA to pin to. Mutually exclusive with
@@ -66,11 +75,11 @@ public sealed record GitHubSkillSource : ISkillSource
 
     /// <summary>The parsed owner / organisation portion of <see cref="Repo"/>.</summary>
     [JsonIgnore]
-    public string Owner => GitHubRepoReference.Parse(Repo).Owner;
+    public string Owner => ParsedRepo.Owner;
 
     /// <summary>The parsed repository name portion of <see cref="Repo"/>.</summary>
     [JsonIgnore]
-    public string RepoName => GitHubRepoReference.Parse(Repo).Name;
+    public string RepoName => ParsedRepo.Name;
 
     /// <summary>The canonical <c>owner/name</c> slug, useful for logging.</summary>
     [JsonIgnore]
@@ -78,10 +87,16 @@ public sealed record GitHubSkillSource : ISkillSource
     {
         get
         {
-            var (o, n) = GitHubRepoReference.Parse(Repo);
+            var (o, n) = ParsedRepo;
             return $"{o}/{n}";
         }
     }
+
+    /// <summary>
+    ///     Parses <see cref="Repo"/> once and caches the result process-wide,
+    ///     so the three convenience properties above are cheap to read repeatedly.
+    /// </summary>
+    private (string Owner, string Name) ParsedRepo => RepoCache.GetOrAdd(Repo, GitHubRepoReference.Parse);
 
     /// <summary>
     ///     Effective sub-paths to mirror. Returns <see cref="Paths"/> when set,
@@ -89,10 +104,10 @@ public sealed record GitHubSkillSource : ISkillSource
     ///     an empty list (meaning the whole repository).
     /// </summary>
     [JsonIgnore]
-    public IReadOnlyList<string> EffectivePaths =>
+    public IReadOnlyList<PathSpec> EffectivePaths =>
         Paths is { Count: > 0 } p
             ? p
-            : (string.IsNullOrWhiteSpace(Path) ? Array.Empty<string>() : new[] { Path });
+            : (string.IsNullOrWhiteSpace(Path) ? Array.Empty<PathSpec>() : new PathSpec[] { new(Path) });
 
     /// <summary>
     ///     Resolves the git ref (commit SHA, tag, or branch) that should be

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/anomalyco/Zakira.Conduit/main/schemas/conduit.schema.json",
+  "$id": "https://raw.githubusercontent.com/MoaidHathot/Zakira.Conduit/main/schemas/conduit.schema.json",
   "title": "Zakira.Conduit manifest",
   "description": "Manifest describing skill sources to mirror into one or more local target directories.",
   "type": "object",
@@ -36,9 +36,23 @@
         "targets": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 }
+          "items": { "$ref": "#/$defs/pathOrAliased" }
         }
       }
+    },
+    "pathOrAliased": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "as":   { "type": "string", "minLength": 1, "description": "Renames the destination sub-directory for this entry/path." }
+          }
+        }
+      ]
     },
     "source": {
       "oneOf": [
@@ -64,23 +78,20 @@
         "paths": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
-          "description": "Optional list of sub-paths. Mutually exclusive with 'path'. With one element the destination subdirectory uses the entry name; with two or more, each sub-path mirrors to its basename and the entry name is metadata only."
+          "items": { "$ref": "#/$defs/pathOrAliased" },
+          "description": "Optional list of sub-paths. Mutually exclusive with 'path'. With one element the destination subdirectory uses the entry name; with two or more, each sub-path mirrors to its basename (or 'as' alias) and the entry name is metadata only."
         },
         "branch": {
           "type": "string",
-          "description": "Branch or tag name. Mutually exclusive with 'commit'."
+          "description": "Branch (or tag) name. May coexist with 'commit': in that case 'branch' is the tracking intent and 'commit' is the locked-in snapshot. `conduit pin` and `conduit update` rewrite 'commit' to the latest SHA on this branch."
         },
         "commit": {
           "type": "string",
-          "description": "Commit SHA. Mutually exclusive with 'branch'."
+          "description": "Commit SHA. When both 'branch' and 'commit' are present, 'commit' wins for fetching; 'branch' is retained as the refresh intent."
         }
       },
       "not": {
-        "anyOf": [
-          { "required": ["branch", "commit"] },
-          { "required": ["path", "paths"] }
-        ]
+        "required": ["path", "paths"]
       }
     },
     "localSource": {
@@ -97,7 +108,7 @@
         "paths": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
+          "items": { "$ref": "#/$defs/pathOrAliased" },
           "description": "Multiple source directories. Mutually exclusive with 'path'."
         }
       },

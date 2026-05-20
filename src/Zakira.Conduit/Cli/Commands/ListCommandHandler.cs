@@ -1,25 +1,28 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Zakira.Conduit.Manifest;
 
 namespace Zakira.Conduit.Cli.Commands;
 
 /// <summary>
-///     Implements the <c>list</c> command. Prints a one-line summary per entry.
+///     Implements the <c>list</c> command.
 /// </summary>
 internal sealed class ListCommandHandler
 {
     private readonly IManifestLocator _locator;
     private readonly IManifestLoader _loader;
+    private readonly ConsoleStyle _style;
     private readonly ILogger<ListCommandHandler> _logger;
 
-    public ListCommandHandler(IManifestLocator locator, IManifestLoader loader, ILogger<ListCommandHandler> logger)
+    public ListCommandHandler(IManifestLocator locator, IManifestLoader loader, ConsoleStyle style, ILogger<ListCommandHandler> logger)
     {
         _locator = locator;
         _loader = loader;
+        _style = style;
         _logger = logger;
     }
 
-    public async Task<int> InvokeAsync(string? manifest, CancellationToken cancellationToken)
+    public async Task<int> InvokeAsync(string? manifest, OutputFormat output, CancellationToken cancellationToken)
     {
         string manifestPath;
         ConduitManifest model;
@@ -31,17 +34,31 @@ internal sealed class ListCommandHandler
         }
         catch (ManifestException ex)
         {
-            ErrorRenderer.RenderManifestError(ex);
+            ErrorRenderer.RenderManifestError(ex, output);
             return 2;
         }
 
-        Console.WriteLine($"# {manifestPath}");
-        Console.WriteLine($"# version={model.Version}, entries={model.Entries.Count}");
+        if (output == OutputFormat.Json)
+        {
+            RenderJson(manifestPath, model);
+        }
+        else
+        {
+            RenderText(manifestPath, model);
+        }
+
+        return 0;
+    }
+
+    private void RenderText(string manifestPath, ConduitManifest model)
+    {
+        Console.WriteLine(_style.Dim($"# {manifestPath}"));
+        Console.WriteLine(_style.Dim($"# version={model.Version}, entries={model.Entries.Count}"));
         Console.WriteLine();
 
         foreach (var entry in model.Entries)
         {
-            var status = entry.Disabled ? " (disabled)" : string.Empty;
+            var status = entry.Disabled ? _style.Yellow(" (disabled)") : string.Empty;
             var sourceSummary = entry.Source switch
             {
                 GitHubSkillSource gh => SummarizeGitHub(gh),
@@ -49,21 +66,40 @@ internal sealed class ListCommandHandler
                 _ => entry.Source.Kind,
             };
 
-            Console.WriteLine($"- {entry.Name}{status}");
+            Console.WriteLine($"- {_style.Bold(entry.Name)}{status}");
             Console.WriteLine($"    source : {sourceSummary}");
             Console.WriteLine($"    targets:");
             foreach (var target in entry.Targets)
             {
-                Console.WriteLine($"      - {target}");
+                var aliased = string.IsNullOrWhiteSpace(target.As) ? string.Empty : $"  (as {target.As})";
+                Console.WriteLine($"      - {target.Path}{aliased}");
             }
 
             if (!string.IsNullOrWhiteSpace(entry.Description))
             {
-                Console.WriteLine($"    note   : {entry.Description}");
+                Console.WriteLine($"    note   : {_style.Dim(entry.Description)}");
             }
         }
+    }
 
-        return 0;
+    private static void RenderJson(string manifestPath, ConduitManifest model)
+    {
+        var dto = new
+        {
+            manifest = manifestPath,
+            version = model.Version,
+            entries = model.Entries.Select(e => new
+            {
+                name = e.Name,
+                description = e.Description,
+                disabled = e.Disabled,
+                source = e.Source,
+                targets = e.Targets,
+            }),
+        };
+
+        var json = JsonSerializer.Serialize(dto, ManifestJson.WriteOptions);
+        Console.WriteLine(json);
     }
 
     private static string SummarizeGitHub(GitHubSkillSource gh)
@@ -72,11 +108,12 @@ internal sealed class ListCommandHandler
             : gh.Branch is not null ? $"@{gh.Branch}"
             : string.Empty;
 
-        var pathPart = gh.EffectivePaths.Count switch
+        var paths = gh.EffectivePaths;
+        var pathPart = paths.Count switch
         {
             0 => string.Empty,
-            1 => ":" + gh.EffectivePaths[0],
-            _ => ":[" + string.Join(", ", gh.EffectivePaths) + "]",
+            1 => ":" + FormatPathSpec(paths[0]),
+            _ => ":[" + string.Join(", ", paths.Select(FormatPathSpec)) + "]",
         };
 
         return $"github:{gh.Slug}{pathPart}{refPart}";
@@ -88,8 +125,11 @@ internal sealed class ListCommandHandler
         return paths.Count switch
         {
             0 => "local:<no paths>",
-            1 => "local:" + paths[0],
-            _ => "local:[" + string.Join(", ", paths) + "]",
+            1 => "local:" + FormatPathSpec(paths[0]),
+            _ => "local:[" + string.Join(", ", paths.Select(FormatPathSpec)) + "]",
         };
     }
+
+    private static string FormatPathSpec(PathSpec spec) =>
+        string.IsNullOrWhiteSpace(spec.As) ? spec.Path : $"{spec.Path} as {spec.As}";
 }

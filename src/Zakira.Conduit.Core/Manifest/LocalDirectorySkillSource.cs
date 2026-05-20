@@ -31,9 +31,11 @@ public sealed record LocalDirectorySkillSource : ISkillSource
 
     /// <summary>
     ///     One or more source directories. Mutually exclusive with <see cref="Path"/>.
+    ///     Each element may be a string or an object with <c>path</c> + optional
+    ///     <c>as</c> alias.
     /// </summary>
     [JsonPropertyName("paths")]
-    public IReadOnlyList<string>? Paths { get; init; }
+    public IReadOnlyList<PathSpec>? Paths { get; init; }
 
     /// <inheritdoc />
     [JsonIgnore]
@@ -45,8 +47,8 @@ public sealed record LocalDirectorySkillSource : ISkillSource
     ///     otherwise an empty list (which is a validation error).
     /// </summary>
     [JsonIgnore]
-    public IReadOnlyList<string> EffectivePaths =>
+    public IReadOnlyList<PathSpec> EffectivePaths =>
         Paths is { Count: > 0 } p
             ? p
-            : (string.IsNullOrWhiteSpace(Path) ? Array.Empty<string>() : new[] { Path });
+            : (string.IsNullOrWhiteSpace(Path) ? Array.Empty<PathSpec>() : new PathSpec[] { new(Path) });
 }

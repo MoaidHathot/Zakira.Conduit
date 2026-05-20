@@ -29,9 +29,16 @@ public sealed record ConduitEntry
     ///     named <see cref="Name"/> will be created (or replaced) with the
     ///     mirrored content. Paths may include <c>~</c> and environment
     ///     variables such as <c>$XDG_CONFIG_HOME</c>.
+    ///     <para>
+    ///         Each entry in the array can be either a plain string (the
+    ///         common case) or an object with <c>path</c> and an optional
+    ///         <c>as</c> alias that overrides <see cref="Name"/> for that
+    ///         target only. The aliased form is rejected for multi-content
+    ///         entries by <see cref="ManifestValidator"/>.
+    ///     </para>
     /// </summary>
     [JsonPropertyName("targets")]
-    public required IReadOnlyList<string> Targets { get; init; }
+    public required IReadOnlyList<PathSpec> Targets { get; init; }
 
     /// <summary>
     ///     Optional, free-form description for documentation purposes.

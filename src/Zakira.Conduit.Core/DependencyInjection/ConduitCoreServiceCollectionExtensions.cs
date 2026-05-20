@@ -31,9 +31,11 @@ public static class ConduitCoreServiceCollectionExtensions
 
         services.TryAddSingleton<IManifestLocator, DefaultManifestLocator>();
         services.TryAddSingleton<IManifestLoader, JsonManifestLoader>();
+        services.TryAddSingleton<IManifestWriter, JsonNodeManifestWriter>();
         services.TryAddSingleton<IPathResolver, DefaultPathResolver>();
         services.TryAddSingleton<IDirectoryMirror, AtomicDirectoryMirror>();
         services.TryAddSingleton<ISkillSourceFetcherRegistry, DefaultSkillSourceFetcherRegistry>();
+        services.TryAddSingleton<IConduitStateStore, JsonConduitStateStore>();
         services.TryAddSingleton<IConduitSynchronizer, DefaultConduitSynchronizer>();
 
         services.AddGitHubSkillSource(configureGitHub);
@@ -90,6 +92,14 @@ public static class ConduitCoreServiceCollectionExtensions
         }
 
         services.AddHttpClient<IGitHubArchiveDownloader, GitHubArchiveDownloader>()
+            .ConfigureHttpClient((sp, client) =>
+            {
+                var opts = sp.GetRequiredService<IOptions<GitHubFetcherOptions>>().Value;
+                client.BaseAddress = opts.BaseAddress;
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
+
+        services.AddHttpClient<IGitHubRefResolver, GitHubRefResolver>()
             .ConfigureHttpClient((sp, client) =>
             {
                 var opts = sp.GetRequiredService<IOptions<GitHubFetcherOptions>>().Value;

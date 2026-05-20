@@ -44,17 +44,47 @@ public sealed class GitHubSkillSourceFetcher : ISkillSourceFetcher
 
         try
         {
-            _logger.LogInformation("Fetching {Slug} (ref={Ref}, paths=[{Paths}])",
-                gh.Slug, ref0 ?? "<default>", string.Join(", ", gh.EffectivePaths));
+            _logger.LogInformation("Fetching {Slug} (ref={Ref}, paths=[{Paths}], etagHint={Etag})",
+                gh.Slug, ref0 ?? "<default>", string.Join(", ", gh.EffectivePaths.Select(p => p.Path)), context.PreviousEtag ?? "<none>");
 
-            // 1. Download the zipball once.
+            // 1. Download the zipball once, optionally with If-None-Match.
             var archivePath = Path.Combine(workRoot, "archive.zip");
+            GitHubDownloadResult downloadResult;
             await using (var archiveStream = File.Create(archivePath))
             {
-                await _downloader.DownloadAsync(gh.Owner, gh.RepoName, ref0, archiveStream, cancellationToken).ConfigureAwait(false);
+                downloadResult = await _downloader.DownloadAsync(
+                    gh.Owner,
+                    gh.RepoName,
+                    ref0,
+                    archiveStream,
+                    context.PreviousEtag,
+                    cancellationToken).ConfigureAwait(false);
             }
 
-            // 2. Extract everything once. (Zipballs are small repository snapshots.)
+            // 2a. Short-circuit on 304: cleanup the (empty) temp dir and
+            //     return an Unchanged sentinel for the synchronizer.
+            if (downloadResult.NotModified)
+            {
+                Directory.Delete(workRoot, recursive: true);
+                return FetchedSource.Unchanged(source, resolvedRef: null, etag: downloadResult.Etag);
+            }
+
+            // 2b. Peek the resolved short SHA from the zipball wrapper folder
+            //     (useful when the caller asked for a branch).
+            string? resolvedShortSha = null;
+            await using (var archiveStream = File.OpenRead(archivePath))
+            {
+                try
+                {
+                    resolvedShortSha = ZipballExtractor.PeekResolvedShortSha(archiveStream);
+                }
+                catch
+                {
+                    // Best-effort: continue with whatever ref the caller gave us.
+                }
+            }
+
+            // 3. Extract everything once. (Zipballs are small repository snapshots.)
             await using (var archiveStream = File.OpenRead(archivePath))
             {
                 var filesExtracted = ZipballExtractor.Extract(archiveStream, extractedRoot, subPath: null);
@@ -70,7 +100,7 @@ public sealed class GitHubSkillSourceFetcher : ISkillSourceFetcher
 
             File.Delete(archivePath);
 
-            // 3. Build the content unit list.
+            // 4. Build the content unit list.
             var effectivePaths = gh.EffectivePaths;
             var contents = new List<FetchedContent>(capacity: effectivePaths.Count == 0 ? 1 : effectivePaths.Count);
 
@@ -83,25 +113,32 @@ public sealed class GitHubSkillSourceFetcher : ISkillSourceFetcher
             {
                 foreach (var subPath in effectivePaths)
                 {
-                    var normalized = subPath.Replace('\\', '/').Trim('/');
+                    var normalized = subPath.Path.Replace('\\', '/').Trim('/');
                     var resolved = Path.Combine(extractedRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
 
                     if (!Directory.Exists(resolved))
                     {
                         throw new GitHubDownloadException(
-                            $"Sub-path '{subPath}' was not found in archive for '{gh.Slug}'.",
+                            $"Sub-path '{subPath.Path}' was not found in archive for '{gh.Slug}'.",
                             System.Net.HttpStatusCode.OK);
                     }
 
-                    var basename = Path.GetFileName(normalized);
-                    contents.Add(new FetchedContent(resolved, basename));
+                    contents.Add(new FetchedContent(resolved, subPath.ResolvedBasename));
                 }
             }
+
+            // Prefer the extracted short SHA when present; otherwise echo back
+            // whatever ref the user provided. Commit pins stay verbatim.
+            var resolvedRefForState = !string.IsNullOrEmpty(gh.Commit)
+                ? gh.Commit
+                : (resolvedShortSha ?? ref0);
 
             return new FetchedSource(
                 contents: contents,
                 source: source,
-                resolvedRef: ref0,
+                resolvedRef: resolvedRefForState,
+                etag: downloadResult.Etag,
+                notModified: false,
                 cleanup: () =>
                 {
                     try

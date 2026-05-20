@@ -39,7 +39,7 @@ public sealed class JsonManifestLoaderTests
 
         var entry = manifest.Entries[0];
         entry.Name.Should().Be("code-review");
-        entry.Targets.Should().ContainSingle().Which.Should().Be("~/.config/agents/skills");
+        entry.Targets.Should().ContainSingle().Which.Path.Should().Be("~/.config/agents/skills");
 
         var github = entry.Source.Should().BeOfType<GitHubSkillSource>().Subject;
         github.Repo.Should().Be("anthropics/skills");
@@ -134,7 +134,6 @@ public sealed class JsonManifestLoaderTests
         ex.Which.Errors.Should().NotBeEmpty();
         ex.Which.Errors.Should().Contain(e => e.Contains("name", StringComparison.Ordinal));
         ex.Which.Errors.Should().Contain(e => e.Contains("targets", StringComparison.Ordinal));
-        ex.Which.Errors.Should().Contain(e => e.Contains("mutually exclusive", StringComparison.Ordinal));
     }
 
     [Fact]

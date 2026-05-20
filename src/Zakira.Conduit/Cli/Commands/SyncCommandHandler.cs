@@ -12,17 +12,27 @@ internal sealed class SyncCommandHandler
     private readonly IManifestLocator _locator;
     private readonly IManifestLoader _loader;
     private readonly IConduitSynchronizer _synchronizer;
+    private readonly ConsoleStyle _style;
     private readonly ILogger<SyncCommandHandler> _logger;
 
-    public SyncCommandHandler(IManifestLocator locator, IManifestLoader loader, IConduitSynchronizer synchronizer, ILogger<SyncCommandHandler> logger)
+    public SyncCommandHandler(IManifestLocator locator, IManifestLoader loader, IConduitSynchronizer synchronizer, ConsoleStyle style, ILogger<SyncCommandHandler> logger)
     {
         _locator = locator;
         _loader = loader;
         _synchronizer = synchronizer;
+        _style = style;
         _logger = logger;
     }
 
-    public async Task<int> InvokeAsync(string? manifest, IReadOnlyList<string> entries, bool dryRun, bool stopOnFirstError, CancellationToken cancellationToken)
+    public async Task<int> InvokeAsync(
+        string? manifest,
+        IReadOnlyList<string> entries,
+        bool dryRun,
+        bool stopOnFirstError,
+        bool force,
+        int maxParallelism,
+        OutputFormat output,
+        CancellationToken cancellationToken)
     {
         string manifestPath;
         ConduitManifest model;
@@ -34,7 +44,7 @@ internal sealed class SyncCommandHandler
         }
         catch (ManifestException ex)
         {
-            ErrorRenderer.RenderManifestError(ex);
+            ErrorRenderer.RenderManifestError(ex, output);
             return 2;
         }
 
@@ -43,10 +53,12 @@ internal sealed class SyncCommandHandler
             EntryNames = entries.Count == 0 ? null : entries,
             DryRun = dryRun,
             StopOnFirstError = stopOnFirstError,
+            Force = force,
+            MaxParallelism = maxParallelism <= 0 ? 4 : maxParallelism,
         };
 
         var report = await _synchronizer.SyncAsync(model, manifestPath, options, cancellationToken).ConfigureAwait(false);
-        ReportRenderer.Render(report);
+        ReportRenderer.Render(report, output, _style);
         return report.ExitCode;
     }
 }
