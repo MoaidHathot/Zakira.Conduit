@@ -53,17 +53,16 @@ internal sealed class WatchCommandHandler
                         ?? throw new InvalidOperationException("Manifest path has no parent directory.");
         var fileName = Path.GetFileName(manifestPath);
 
-        Console.WriteLine(_style.Bold($"Watching {manifestPath} (Ctrl+C to stop)..."));
-
-        // Initial pass.
-        await RunSyncOnceAsync(manifestPath, maxParallelism, output, "initial sync", cancellationToken).ConfigureAwait(false);
-
-        // FSW + debounce: coalesce burst writes from editors that do
-        // create-temp / rename-over-original, plus rapid double-saves.
+        // Set up the FileSystemWatcher BEFORE the initial sync so that any
+        // manifest edit landing during the initial sync (or in the tiny
+        // window between "initial sync finished" and "loop started") still
+        // delivers an inotify / ReadDirectoryChangesW event. Doing this in
+        // the opposite order is racy on Linux where the test runner is
+        // fast enough to write the new manifest before EnableRaisingEvents
+        // gets toggled.
         using var watcher = new FileSystemWatcher(directory, fileName)
         {
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
-            EnableRaisingEvents = true,
         };
 
         var changeSignal = new SemaphoreSlim(initialCount: 0, maxCount: 1);
@@ -79,6 +78,21 @@ internal sealed class WatchCommandHandler
         watcher.Changed += bump;
         watcher.Created += bump;
         watcher.Renamed += bumpRenamed;
+        watcher.EnableRaisingEvents = true;
+
+        Console.WriteLine(_style.Bold($"Watching {manifestPath} (Ctrl+C to stop)..."));
+
+        // Initial pass. The watcher above is already armed by this point;
+        // any subsequent manifest write will be captured.
+        await RunSyncOnceAsync(manifestPath, maxParallelism, output, "initial sync", cancellationToken).ConfigureAwait(false);
+
+        // Drain any signal that arrived during startup (e.g. if the IDE
+        // touched the file while we were running the initial sync). We
+        // only care about user-initiated changes from here on.
+        while (changeSignal.CurrentCount > 0)
+        {
+            await changeSignal.WaitAsync(0, cancellationToken).ConfigureAwait(false);
+        }
 
         var delay = TimeSpan.FromMilliseconds(Math.Max(50, debounceMs));
 

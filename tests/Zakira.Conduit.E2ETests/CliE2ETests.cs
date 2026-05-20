@@ -690,21 +690,28 @@ public sealed class CliE2ETests
 
         // Spawn watch in the background. Cancel after a short wait by cancelling
         // the harness CancellationToken (which kills the process).
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
         var watchTask = ConduitCli.RunAsync(
             ["watch", "--manifest", manifestPath, "--debounce", "100"],
             environmentOverrides: env,
-            timeout: TimeSpan.FromSeconds(15),
+            timeout: TimeSpan.FromSeconds(30),
             cancellationToken: cts.Token);
 
-        // Wait for the initial sync to land.
+        // Wait for the initial sync to land. Allow generously for cold-start
+        // JIT on slow CI runners (Ubuntu can take a few seconds the first time).
         var initialPath = tmp.Combine("dest", "demo", "SKILL.md");
-        await WaitForFileAsync(initialPath, TimeSpan.FromSeconds(5));
+        await WaitForFileAsync(initialPath, TimeSpan.FromSeconds(15));
         File.ReadAllText(initialPath).Should().Be("watch-content");
 
+        // Give the in-process FileSystemWatcher a beat to settle after the
+        // initial sync completes - on Linux there's a tiny inotify-arming
+        // gap that an immediate manifest write could race past, and the
+        // production fix is to set up the watcher BEFORE the initial sync
+        // (see WatchCommandHandler).
+        await Task.Delay(500);
+
         // Modify the manifest to trigger a re-sync. Switch to a different repo
-        // (mock returns the same content for both, but the manifest change is
-        // what's important).
+        // (mock returns different content, so we can prove the new sync ran).
         var payload2 = ZipballPayload.Build("acme-skills-watch-v2", new Dictionary<string, string>
         {
             ["SKILL.md"] = "watch-content-v2",
@@ -715,7 +722,7 @@ public sealed class CliE2ETests
             { "version": 1, "entries": [ { "name": "demo", "source": { "type": "github", "repo": "acme/skills2" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("dest"))}} ] } ] }
             """);
 
-        await WaitForContentAsync(initialPath, "watch-content-v2", TimeSpan.FromSeconds(5));
+        await WaitForContentAsync(initialPath, "watch-content-v2", TimeSpan.FromSeconds(15));
         File.ReadAllText(initialPath).Should().Be("watch-content-v2");
 
         // Stop the watch process. We expect cancellation; an exit-code check
