@@ -45,7 +45,7 @@ internal sealed class ListCommandHandler
             var sourceSummary = entry.Source switch
             {
                 GitHubSkillSource gh => SummarizeGitHub(gh),
-                LocalDirectorySkillSource local => $"local:{local.Path}",
+                LocalDirectorySkillSource local => SummarizeLocal(local),
                 _ => entry.Source.Kind,
             };
 
@@ -71,7 +71,25 @@ internal sealed class ListCommandHandler
         var refPart = gh.Commit is not null ? $"@{gh.Commit}"
             : gh.Branch is not null ? $"@{gh.Branch}"
             : string.Empty;
-        var pathPart = string.IsNullOrEmpty(gh.Path) ? string.Empty : $":{gh.Path}";
+
+        var pathPart = gh.EffectivePaths.Count switch
+        {
+            0 => string.Empty,
+            1 => ":" + gh.EffectivePaths[0],
+            _ => ":[" + string.Join(", ", gh.EffectivePaths) + "]",
+        };
+
         return $"github:{gh.Slug}{pathPart}{refPart}";
+    }
+
+    private static string SummarizeLocal(LocalDirectorySkillSource local)
+    {
+        var paths = local.EffectivePaths;
+        return paths.Count switch
+        {
+            0 => "local:<no paths>",
+            1 => "local:" + paths[0],
+            _ => "local:[" + string.Join(", ", paths) + "]",
+        };
     }
 }

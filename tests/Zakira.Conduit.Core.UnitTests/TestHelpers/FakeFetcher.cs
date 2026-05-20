@@ -36,7 +36,7 @@ internal sealed class FakeFetcher : ISkillSourceFetcher
             File.WriteAllText(path, content);
         }
 
-        return Task.FromResult(new FetchedSource(
+        return Task.FromResult(FetchedSource.FromSingleDirectory(
             contentDirectory: dir,
             source: source,
             resolvedRef: source is GitHubSkillSource gh ? gh.ResolvedRef ?? "<default>" : null,

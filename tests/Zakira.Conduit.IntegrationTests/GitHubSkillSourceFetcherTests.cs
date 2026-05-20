@@ -25,15 +25,15 @@ public sealed class GitHubSkillSourceFetcherTests
         server.MapZipball("anthropics", "skills", gitRef: "main", payload);
 
         var fetcher = BuildFetcher(server);
-        var source = new GitHubSkillSource { Owner = "anthropics", Repo = "skills", Path = "skills/code-review", Branch = "main" };
+        var source = new GitHubSkillSource { Repo = "anthropics/skills", Path = "skills/code-review", Branch = "main" };
 
         await using var fetched = await fetcher.FetchAsync(source, DefaultContext);
 
-        fetched.ContentDirectory.Should().NotBeNullOrEmpty();
-        Directory.Exists(fetched.ContentDirectory).Should().BeTrue();
-        File.Exists(Path.Combine(fetched.ContentDirectory, "SKILL.md")).Should().BeTrue();
-        File.Exists(Path.Combine(fetched.ContentDirectory, "checks.json")).Should().BeTrue();
-        Directory.Exists(Path.Combine(fetched.ContentDirectory, "other")).Should().BeFalse();
+        fetched.Contents[0].ContentDirectory.Should().NotBeNullOrEmpty();
+        Directory.Exists(fetched.Contents[0].ContentDirectory).Should().BeTrue();
+        File.Exists(Path.Combine(fetched.Contents[0].ContentDirectory, "SKILL.md")).Should().BeTrue();
+        File.Exists(Path.Combine(fetched.Contents[0].ContentDirectory, "checks.json")).Should().BeTrue();
+        Directory.Exists(Path.Combine(fetched.Contents[0].ContentDirectory, "other")).Should().BeFalse();
         fetched.ResolvedRef.Should().Be("main");
     }
 
@@ -45,12 +45,12 @@ public sealed class GitHubSkillSourceFetcherTests
         server.MapZipball("o", "r", gitRef: null, payload);
 
         var fetcher = BuildFetcher(server);
-        var source = new GitHubSkillSource { Owner = "o", Repo = "r" };
+        var source = new GitHubSkillSource { Repo = "o/r" };
 
         string contentDir;
         await using (var fetched = await fetcher.FetchAsync(source, DefaultContext))
         {
-            contentDir = fetched.ContentDirectory;
+            contentDir = fetched.Contents[0].ContentDirectory;
             Directory.Exists(contentDir).Should().BeTrue();
         }
 
@@ -70,7 +70,7 @@ public sealed class GitHubSkillSourceFetcherTests
         server.MapZipball("o", "r", gitRef: null, payload);
 
         var fetcher = BuildFetcher(server);
-        var source = new GitHubSkillSource { Owner = "o", Repo = "r", Path = "does/not/exist" };
+        var source = new GitHubSkillSource { Repo = "o/r", Path = "does/not/exist" };
 
         var act = () => fetcher.FetchAsync(source, DefaultContext);
         await act.Should().ThrowAsync<GitHubDownloadException>();
@@ -84,12 +84,83 @@ public sealed class GitHubSkillSourceFetcherTests
         server.MapZipball("o", "r", gitRef: "abc123", payload);
 
         var fetcher = BuildFetcher(server);
-        var source = new GitHubSkillSource { Owner = "o", Repo = "r", Commit = "abc123" };
+        var source = new GitHubSkillSource { Repo = "o/r", Commit = "abc123" };
 
         await using var fetched = await fetcher.FetchAsync(source, DefaultContext);
 
         fetched.ResolvedRef.Should().Be("abc123");
         server.Requests.Should().ContainSingle(r => r.Path.EndsWith("/zipball/abc123", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Multi_path_fetch_produces_one_content_unit_per_path_with_basename_hints()
+    {
+        await using var server = new MockGitHubServer();
+        var payload = ZipballPayload.Build("acme-skills-abc", new Dictionary<string, string>
+        {
+            ["skills/code-review/SKILL.md"] = "review",
+            ["skills/code-review/data.json"] = "{}",
+            ["skills/test-writer/SKILL.md"] = "tests",
+            ["skills/refactor/SKILL.md"] = "refactor",
+            ["docs/IGNORE.md"] = "should be ignored",
+        });
+        server.MapZipball("acme", "skills", gitRef: "main", payload);
+
+        var fetcher = BuildFetcher(server);
+        var source = new GitHubSkillSource
+        {
+            Repo = "acme/skills",
+            Branch = "main",
+            Paths = ["skills/code-review", "skills/test-writer", "skills/refactor"],
+        };
+
+        await using var fetched = await fetcher.FetchAsync(source, DefaultContext);
+
+        fetched.Contents.Should().HaveCount(3);
+        fetched.Contents.Select(c => c.SuggestedDestinationName).Should().BeEquivalentTo(["code-review", "test-writer", "refactor"]);
+
+        // Each content directory should hold only its own files.
+        var reviewDir = fetched.Contents.Single(c => c.SuggestedDestinationName == "code-review").ContentDirectory;
+        File.Exists(Path.Combine(reviewDir, "SKILL.md")).Should().BeTrue();
+        File.Exists(Path.Combine(reviewDir, "data.json")).Should().BeTrue();
+        File.Exists(Path.Combine(reviewDir, "IGNORE.md")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Multi_path_fetch_makes_a_single_http_request()
+    {
+        await using var server = new MockGitHubServer();
+        var payload = ZipballPayload.Build("acme-skills-abc", new Dictionary<string, string>
+        {
+            ["a/SKILL.md"] = "1",
+            ["b/SKILL.md"] = "2",
+            ["c/SKILL.md"] = "3",
+        });
+        server.MapZipball("acme", "skills", gitRef: null, payload);
+
+        var fetcher = BuildFetcher(server);
+        var source = new GitHubSkillSource { Repo = "acme/skills", Paths = ["a", "b", "c"] };
+
+        await using var _ = await fetcher.FetchAsync(source, DefaultContext);
+
+        server.Requests.Should().ContainSingle(because: "the fetcher must reuse one zipball download for every requested path");
+    }
+
+    [Fact]
+    public async Task Multi_path_fetch_fails_fast_when_one_path_is_missing()
+    {
+        await using var server = new MockGitHubServer();
+        var payload = ZipballPayload.Build("acme-skills-abc", new Dictionary<string, string>
+        {
+            ["good/SKILL.md"] = "ok",
+        });
+        server.MapZipball("acme", "skills", gitRef: null, payload);
+
+        var fetcher = BuildFetcher(server);
+        var source = new GitHubSkillSource { Repo = "acme/skills", Paths = ["good", "missing"] };
+
+        var act = () => fetcher.FetchAsync(source, DefaultContext);
+        await act.Should().ThrowAsync<GitHubDownloadException>();
     }
 
     private static ISkillSourceFetcher BuildFetcher(MockGitHubServer server)
@@ -103,6 +174,6 @@ public sealed class GitHubSkillSourceFetcherTests
 
         var provider = services.BuildServiceProvider();
         var registry = provider.GetRequiredService<ISkillSourceFetcherRegistry>();
-        return registry.GetFetcher(new GitHubSkillSource { Owner = "x", Repo = "y" });
+        return registry.GetFetcher(new GitHubSkillSource { Repo = "x/y" });
     }
 }

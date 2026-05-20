@@ -6,7 +6,7 @@ namespace Zakira.Conduit.Sources.GitHub;
 /// <summary>
 ///     <see cref="ISkillSourceFetcher"/> for <see cref="GitHubSkillSource"/>.
 ///     Downloads a zipball snapshot (no full git clone) and extracts it,
-///     optionally filtered to a sub-path of the repository.
+///     optionally producing one content unit per requested sub-path.
 /// </summary>
 public sealed class GitHubSkillSourceFetcher : ISkillSourceFetcher
 {
@@ -39,38 +39,67 @@ public sealed class GitHubSkillSourceFetcher : ISkillSourceFetcher
         var workRoot = Path.Combine(Path.GetTempPath(), "Zakira.Conduit", "fetch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workRoot);
 
-        var contentDir = Path.Combine(workRoot, "content");
-        Directory.CreateDirectory(contentDir);
+        var extractedRoot = Path.Combine(workRoot, "extracted");
+        Directory.CreateDirectory(extractedRoot);
 
         try
         {
-            _logger.LogInformation("Fetching {Slug} (ref={Ref}, path={Path})", gh.Slug, ref0 ?? "<default>", gh.Path ?? "<root>");
+            _logger.LogInformation("Fetching {Slug} (ref={Ref}, paths=[{Paths}])",
+                gh.Slug, ref0 ?? "<default>", string.Join(", ", gh.EffectivePaths));
 
+            // 1. Download the zipball once.
             var archivePath = Path.Combine(workRoot, "archive.zip");
             await using (var archiveStream = File.Create(archivePath))
             {
-                await _downloader.DownloadAsync(gh.Owner, gh.Repo, ref0, archiveStream, cancellationToken).ConfigureAwait(false);
+                await _downloader.DownloadAsync(gh.Owner, gh.RepoName, ref0, archiveStream, cancellationToken).ConfigureAwait(false);
             }
 
+            // 2. Extract everything once. (Zipballs are small repository snapshots.)
             await using (var archiveStream = File.OpenRead(archivePath))
             {
-                var filesExtracted = ZipballExtractor.Extract(archiveStream, contentDir, gh.Path);
+                var filesExtracted = ZipballExtractor.Extract(archiveStream, extractedRoot, subPath: null);
                 _logger.LogDebug("Extracted {Count} files from {Slug}", filesExtracted, gh.Slug);
 
-                if (!Directory.Exists(contentDir) || !Directory.EnumerateFileSystemEntries(contentDir).Any())
+                if (filesExtracted == 0)
                 {
                     throw new GitHubDownloadException(
-                        gh.Path is null
-                            ? $"Archive for '{gh.Slug}' contained no files."
-                            : $"Sub-path '{gh.Path}' was not found in archive for '{gh.Slug}'.",
+                        $"Archive for '{gh.Slug}' contained no files.",
                         System.Net.HttpStatusCode.OK);
                 }
             }
 
             File.Delete(archivePath);
 
+            // 3. Build the content unit list.
+            var effectivePaths = gh.EffectivePaths;
+            var contents = new List<FetchedContent>(capacity: effectivePaths.Count == 0 ? 1 : effectivePaths.Count);
+
+            if (effectivePaths.Count == 0)
+            {
+                // Whole repo, single unit.
+                contents.Add(new FetchedContent(extractedRoot));
+            }
+            else
+            {
+                foreach (var subPath in effectivePaths)
+                {
+                    var normalized = subPath.Replace('\\', '/').Trim('/');
+                    var resolved = Path.Combine(extractedRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
+
+                    if (!Directory.Exists(resolved))
+                    {
+                        throw new GitHubDownloadException(
+                            $"Sub-path '{subPath}' was not found in archive for '{gh.Slug}'.",
+                            System.Net.HttpStatusCode.OK);
+                    }
+
+                    var basename = Path.GetFileName(normalized);
+                    contents.Add(new FetchedContent(resolved, basename));
+                }
+            }
+
             return new FetchedSource(
-                contentDirectory: contentDir,
+                contents: contents,
                 source: source,
                 resolvedRef: ref0,
                 cleanup: () =>

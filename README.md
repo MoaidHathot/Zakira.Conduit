@@ -16,13 +16,15 @@
 
 ## Highlights
 
-- **One manifest, many targets.** Each entry has a single source and a list of destinations; the same skill can be mirrored everywhere it's needed.
+- **One manifest, many targets, many sub-paths.** Each entry has a single source (which may produce one or many content units) and a list of destinations.
 - **Multiple source kinds, same model.** Ships with **GitHub** (zipball snapshot) and **local directory** sources today; new kinds (GitLab, plain HTTP archive, …) are a single record + fetcher away.
+- **Browser-paste friendly.** GitHub sources accept slug (`owner/repo`), browser URL (`https://github.com/owner/repo`), or SSH form (`git@github.com:owner/repo.git`) in the same field.
+- **Multi-path fetches.** A single entry can pull N sub-paths out of one source in one go (one zipball, one extraction, N destinations).
 - **No `git clone` required.** GitHub sources are fetched as a *zipball snapshot* over HTTPS (one request, no `.git/` history, supports any commit/branch/tag).
 - **Atomic mirroring.** Each target is written via a sibling staging directory and swapped in place, so a failure cannot leave a half-updated target.
 - **Stale files are removed.** When a source changes, files that disappeared upstream disappear locally too — without nuking unrelated content in the same target directory.
-- **XDG-friendly discovery.** Drops `conduit.json` at `$XDG_CONFIG_HOME/conduit/`, with sensible fallbacks on Windows and POSIX.
-- **Safety rails.** Refuses to run when a source path overlaps with one of its targets, so a misconfigured local source can't recursively copy itself.
+- **XDG-friendly discovery.** Drops `conduit.json` at `$XDG_CONFIG_HOME/Zakira.Conduit/`, with sensible fallbacks on Windows and POSIX.
+- **Safety rails.** Refuses to run when a source path overlaps with one of its targets, so a misconfigured local source can't recursively copy itself. Duplicate destination basenames in a multi-path entry are caught at validation time.
 - **Extensible.** `ISkillSource` + `ISkillSourceFetcher` are first-class abstractions; adding a new source kind is a single record + fetcher away.
 - **Tested.** Ships with unit, integration and end-to-end test suites; the GitHub fetcher is exercised against an in-process HTTP mock.
 
@@ -53,7 +55,7 @@ dotnet tool update --global Zakira.Conduit
 ## Quickstart
 
 ```bash
-# 1. Create a starter manifest at $XDG_CONFIG_HOME/conduit/conduit.json
+# 1. Create a starter manifest at $XDG_CONFIG_HOME/Zakira.Conduit/conduit.json
 conduit init
 
 # 2. Edit it (or point at your own with --manifest <path>) and validate
@@ -80,7 +82,7 @@ conduit sync     --manifest example/conduit.json --dry-run
 
 ## The manifest (`conduit.json`)
 
-Each entry is one source mirrored to one-or-more targets. The entry's `name` becomes the **sub-directory** that is created inside every target, so the same target directory can host many entries side by side.
+Each entry has a source mirrored to one-or-more targets.
 
 ```jsonc
 {
@@ -89,59 +91,74 @@ Each entry is one source mirrored to one-or-more targets. The entry's `name` bec
   "entries": [
     {
       "name": "code-review",
-      "description": "Anthropic's code-review skill, fetched from GitHub.",
+      "description": "One skill from a GitHub repo, tracked on main.",
       "source": {
         "type": "github",
-        "owner": "anthropics",
-        "repo": "skills",
-        "path": "code-review",        // optional sub-path inside the repo
-        "branch": "main"              // OR "commit": "abc123def..."
+        "repo": "anthropics/skills",     // also accepts https://github.com/anthropics/skills
+        "path": "code-review",
+        "branch": "main"
       },
       "targets": [
         "~/.config/claude/skills",
         "~/projects/foo/.agents/skills"
       ]
+      // → ~/.config/claude/skills/code-review/
+      // → ~/projects/foo/.agents/skills/code-review/
+    },
+
+    {
+      "name": "anthropic-bundle",
+      "description": "Mirror MANY skills from one repo with a single fetch.",
+      "source": {
+        "type": "github",
+        "repo": "https://github.com/anthropics/skills",
+        "paths": ["code-review", "test-writer", "refactor"],
+        "branch": "main"
+      },
+      "targets": ["~/.config/claude/skills"]
+      // → ~/.config/claude/skills/code-review/
+      // → ~/.config/claude/skills/test-writer/
+      // → ~/.config/claude/skills/refactor/
+      // (entry name 'anthropic-bundle' is metadata only when paths.Count > 1)
     },
 
     {
       "name": "internal-runbooks",
-      "description": "Pin a private repo to an immutable commit.",
+      "description": "Private repo pinned to a commit SHA. Uses $CONDUIT_GITHUB_TOKEN.",
       "source": {
         "type": "github",
-        "owner": "my-org",
-        "repo": "agent-runbooks",
-        "commit": "1f2e3d4c5b6a"      // pin to an immutable commit SHA
+        "repo": "my-org/agent-runbooks",
+        "commit": "1f2e3d4c5b6a"
       },
-      "targets": [
-        "$XDG_CONFIG_HOME/agents/skills"
-      ]
+      "targets": ["$XDG_CONFIG_HOME/agents/skills"]
     },
 
     {
       "name": "house-style",
-      "description": "An in-house skill we keep on disk under version control.",
+      "description": "An in-house skill kept on disk under version control.",
       "source": {
         "type": "local",
-        "path": "./vendor/skills/house-style"   // absolute, or relative to this manifest
+        "path": "./vendor/skills/house-style"
       },
       "targets": [
         "~/.config/claude/skills",
         "~/projects/bar/.agents/skills"
-      ],
-      "disabled": false                // optional, default false
+      ]
+    },
+
+    {
+      "name": "local-bundle",
+      "description": "Mirror several local directories at once.",
+      "source": {
+        "type": "local",
+        "paths": ["./vendor/skills/a", "./vendor/skills/b"]
+      },
+      "targets": ["~/projects/bar/.agents/skills"]
+      // → ~/projects/bar/.agents/skills/a/
+      // → ~/projects/bar/.agents/skills/b/
     }
   ]
 }
-```
-
-The above run produces:
-
-```text
-~/.config/claude/skills/code-review/        # <-- mirror of anthropics/skills/code-review at main
-~/projects/foo/.agents/skills/code-review/  # <-- same content, second target
-$XDG_CONFIG_HOME/agents/skills/internal-runbooks/
-~/.config/claude/skills/house-style/        # <-- mirror of ./vendor/skills/house-style
-~/projects/bar/.agents/skills/house-style/
 ```
 
 ### Source kinds
@@ -152,23 +169,33 @@ Snapshot of a GitHub repository, fetched as a zipball over HTTPS.
 
 | Field    | Required | Notes |
 |----------|----------|-------|
-| `owner`  | yes | Repo owner / org. |
-| `repo`   | yes | Repo name. |
-| `path`   | no  | Repo-relative sub-tree to mirror. No `..`, no leading `/`. |
+| `repo`   | yes | Repository identifier. Accepts the `owner/repo` slug, a browser URL (`https://github.com/owner/repo`, with or without `.git`), `github.com/owner/repo`, or the SSH form (`git@github.com:owner/repo.git`). |
+| `path`   | no  | Single repo-relative sub-path. No `..`, no leading `/`. Mutually exclusive with `paths`. |
+| `paths`  | no  | List of repo-relative sub-paths. Mutually exclusive with `path`. When two or more are listed, each one mirrors to `<target>/<basename>/` and the entry's `name` becomes metadata only (used for filtering and logs). Duplicate basenames are a validation error. |
 | `branch` | no  | Branch or tag name. Mutually exclusive with `commit`. |
 | `commit` | no  | Pin to an immutable commit SHA. Mutually exclusive with `branch`. |
 
-If neither `branch` nor `commit` is given, the repository's default branch is used.
+If neither `branch` nor `commit` is given, the repository's default branch is used. If neither `path` nor `paths` is given, the **whole repository** is mirrored.
 
 #### `local`
 
-A directory on the local filesystem. Useful for in-repo skills, in-house skills you check in next to other code, or anything you'd otherwise `cp -R` manually.
+One or more directories on the local filesystem. Useful for in-repo skills, in-house skills you check in next to other code, or anything you'd otherwise `cp -R` manually.
 
 | Field   | Required | Notes |
 |---------|----------|-------|
-| `path`  | yes | Absolute path, or relative to the manifest's directory. Supports `~` and environment-variable expansion (`$VAR`, `${VAR}`, and `%VAR%` on Windows). |
+| `path`  | one of `path`/`paths` | Single source directory. Absolute, or relative to the manifest's directory. Mutually exclusive with `paths`. |
+| `paths` | one of `path`/`paths` | Multiple source directories. Mutually exclusive with `path`. When two or more are listed, each mirrors to `<target>/<basename>/` and the entry's `name` becomes metadata only. |
 
-No copy is made on the way in — the directory is read directly from the manifest-resolved path and mirrored into each target. `conduit` refuses to run when the source path overlaps with one of its targets, so you can't accidentally recurse into your own output.
+Paths support `~` and environment-variable expansion (`$VAR`, `${VAR}`, and `%VAR%` on Windows). No copy is made on the way in: directories are read directly and mirrored into each target. `conduit` refuses to run when a source path overlaps with one of its targets, so you can't accidentally recurse into your own output.
+
+### Destination naming
+
+| Source produces | Destination per target |
+|---|---|
+| 1 content unit (no `paths`, or 1-element `paths`) | `<target>/<entry.name>/` |
+| N ≥ 2 content units (`paths` with multiple elements) | `<target>/<basename(path)>/` per unit. The entry's `name` is metadata only. |
+
+This keeps the simple case ergonomic ("name the entry after the skill, target gets one folder by that name") while letting one entry mirror N skills out of one source with a single fetch.
 
 ### Field reference
 
@@ -176,7 +203,7 @@ No copy is made on the way in — the directory is read directly from the manife
 |-----------------------------|----------|-------|
 | `version`                   | yes      | Schema version. Currently `1`. |
 | `entries[]`                 | yes      | At least one. |
-| `entries[].name`            | yes      | `[A-Za-z0-9._-]+`. Used as the subdirectory name inside each target. Must be unique within the manifest. |
+| `entries[].name`            | yes      | `[A-Za-z0-9._-]+`. Used as the destination subdirectory when the source produces exactly one content unit; metadata only otherwise. Must be unique within the manifest. |
 | `entries[].description`     | no       | Free-form documentation; ignored at runtime. |
 | `entries[].disabled`        | no       | `true` skips the entry during `sync`. |
 | `entries[].source.type`     | yes      | `"github"` or `"local"`. The discriminator for future source kinds. |
@@ -187,9 +214,9 @@ No copy is made on the way in — the directory is read directly from the manife
 
 When `--manifest` / `-m` is **not** provided, `conduit` looks (in order) at:
 
-1. `$XDG_CONFIG_HOME/conduit/conduit.json`
-2. `$HOME/.config/conduit/conduit.json` *(XDG-style fallback)*
-3. `%APPDATA%/conduit/conduit.json` *(Windows-only fallback)*
+1. `$XDG_CONFIG_HOME/Zakira.Conduit/conduit.json`
+2. `$HOME/.config/Zakira.Conduit/conduit.json` *(XDG-style fallback)*
+3. `%APPDATA%/Zakira.Conduit/conduit.json` *(Windows-only fallback)*
 4. `./conduit.json` *(current working directory)*
 
 The first one that exists wins.
@@ -377,6 +404,17 @@ dotnet pack src/Zakira.Conduit/Zakira.Conduit.csproj -c Release -o ./artifacts
 # Install locally and try it.
 dotnet tool install --global --add-source ./artifacts Zakira.Conduit
 conduit --help
+```
+
+A convenience script wraps pack + push for releases:
+
+```powershell
+# Pack only (writes Zakira.Conduit.*.nupkg + Zakira.Conduit.Core.*.nupkg into ./artifacts).
+./pack.ps1
+
+# Pack + push to nuget.org. Reads the key from $env:NUGET_API_KEY when -ApiKey is omitted.
+$env:NUGET_API_KEY = 'oy2abc...'
+./pack.ps1 -Push
 ```
 
 The integration & E2E tests use [`System.Net.HttpListener`](https://learn.microsoft.com/dotnet/api/system.net.httplistener) to stand up an in-process server that emulates GitHub's `zipball` endpoint, so they run offline and are deterministic.

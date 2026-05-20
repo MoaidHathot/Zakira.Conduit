@@ -1,42 +1,27 @@
 {
   "$schema": "https://raw.githubusercontent.com/anomalyco/Zakira.Conduit/main/schemas/conduit.schema.json",
   "version": 1,
-
   "entries": [
-
-    // ---------------------------------------------------------------------
-    // 1) Pull a single skill out of a multi-skill GitHub repository,
-    //    tracking the latest commit on `main`.
-    // ---------------------------------------------------------------------
     {
-      "name": "code-review",
-      "description": "Code-review skill from a public GitHub repo, tracking main.",
+      "name": "PowerReview",
       "source": {
         "type": "github",
-        "owner": "anthropics",
-        "repo": "skills",
-        "path": "code-review",
+        "repo": "https://github.com/MoaidHathot/PowerReview",
+        "paths": [
+          "skills"
+        ],
         "branch": "main"
       },
       "targets": [
-        "~/.config/claude/skills",
         "~/projects/my-app/.agents/skills"
       ]
     },
-
-    // ---------------------------------------------------------------------
-    // 2) Pin an internal repo to an immutable commit SHA. Useful when you
-    //    want every machine to receive byte-for-byte identical content.
-    //    A `CONDUIT_GITHUB_TOKEN` (or `GITHUB_TOKEN`) env var lifts the
-    //    anonymous rate limit and unlocks private repos.
-    // ---------------------------------------------------------------------
     {
       "name": "internal-runbooks",
       "description": "Private runbooks pinned to a specific commit.",
       "source": {
         "type": "github",
-        "owner": "my-org",
-        "repo": "agent-runbooks",
+        "repo": "my-org/agent-runbooks",
         "commit": "1f2e3d4c5b6a7980abcdef0123456789abcdef01"
       },
       "targets": [
@@ -45,7 +30,7 @@
     },
 
     // ---------------------------------------------------------------------
-    // 3) A local skill that lives next to this manifest (relative paths
+    // 4) A local skill that lives next to this manifest (relative paths
     //    are anchored at the manifest's own directory). Use this for
     //    in-house skills you check in alongside your code, or for any
     //    folder you'd otherwise `cp -R` by hand.
@@ -64,7 +49,26 @@
     },
 
     // ---------------------------------------------------------------------
-    // 4) An entry parked but kept in the manifest for documentation.
+    // 5) Multiple local directories in one entry. Each directory mirrors
+    //    into every target as its own basename sub-folder.
+    // ---------------------------------------------------------------------
+    {
+      "name": "local-skill-bundle",
+      "description": "Mirror several local directories at once.",
+      "source": {
+        "type": "local",
+        "paths": [
+          "./local-skill-sample"
+          // Add more directories here as your house-skill collection grows.
+        ]
+      },
+      "targets": [
+        "~/projects/my-app/.agents/skills"
+      ]
+    },
+
+    // ---------------------------------------------------------------------
+    // 6) An entry parked but kept in the manifest for documentation.
     //    `conduit sync` skips this one until you flip `disabled` back.
     // ---------------------------------------------------------------------
     {
@@ -73,8 +77,7 @@
       "disabled": true,
       "source": {
         "type": "github",
-        "owner": "octocat",
-        "repo": "experimental-skills"
+        "repo": "octocat/experimental-skills"
       },
       "targets": [
         "~/.config/claude/skills"

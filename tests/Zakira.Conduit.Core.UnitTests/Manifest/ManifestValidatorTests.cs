@@ -7,7 +7,7 @@ public sealed class ManifestValidatorTests
     private static ConduitEntry ValidEntry(string name = "ok") => new()
     {
         Name = name,
-        Source = new GitHubSkillSource { Owner = "o", Repo = "r" },
+        Source = new GitHubSkillSource { Repo = "o/r" },
         Targets = ["./out"],
     };
 
@@ -43,8 +43,14 @@ public sealed class ManifestValidatorTests
         ManifestValidator.Validate(manifest).Should().ContainMatch("*invalid characters*");
     }
 
-    [Fact]
-    public void GitHub_source_requires_owner_and_repo()
+    [Theory]
+    [InlineData("")]
+    [InlineData("noslash")]
+    [InlineData("/leading-slash")]
+    [InlineData("owner/repo/extra")]
+    [InlineData("owner//double")]
+    [InlineData("owner/repo with spaces")]
+    public void GitHub_repo_field_must_be_a_recognized_reference(string repo)
     {
         var manifest = new ConduitManifest
         {
@@ -53,15 +59,38 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Owner = "", Repo = "" },
+                    Source = new GitHubSkillSource { Repo = repo },
                     Targets = ["./o"],
                 }
             ],
         };
 
-        var errors = ManifestValidator.Validate(manifest);
-        errors.Should().ContainMatch("*owner*");
-        errors.Should().ContainMatch("*repo*");
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*repo*");
+    }
+
+    [Theory]
+    [InlineData("owner/repo")]
+    [InlineData("https://github.com/owner/repo")]
+    [InlineData("https://github.com/owner/repo.git")]
+    [InlineData("https://github.com/owner/repo/")]
+    [InlineData("github.com/owner/repo")]
+    [InlineData("git@github.com:owner/repo.git")]
+    public void GitHub_repo_field_accepts_slug_and_url_forms(string repo)
+    {
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "x",
+                    Source = new GitHubSkillSource { Repo = repo },
+                    Targets = ["./o"],
+                }
+            ],
+        };
+
+        ManifestValidator.Validate(manifest).Should().BeEmpty();
     }
 
     [Fact]
@@ -74,7 +103,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Owner = "o", Repo = "r", Commit = "abc", Branch = "main" },
+                    Source = new GitHubSkillSource { Repo = "o/r", Commit = "abc", Branch = "main" },
                     Targets = ["./o"],
                 }
             ],
@@ -83,11 +112,87 @@ public sealed class ManifestValidatorTests
         ManifestValidator.Validate(manifest).Should().ContainMatch("*mutually exclusive*");
     }
 
+    [Fact]
+    public void Path_and_paths_are_mutually_exclusive_on_github()
+    {
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "x",
+                    Source = new GitHubSkillSource { Repo = "o/r", Path = "a", Paths = ["b"] },
+                    Targets = ["./o"],
+                }
+            ],
+        };
+
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*'path' and 'paths' are mutually exclusive*");
+    }
+
+    [Fact]
+    public void Path_and_paths_are_mutually_exclusive_on_local()
+    {
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "x",
+                    Source = new LocalDirectorySkillSource { Path = "a", Paths = ["b"] },
+                    Targets = ["./o"],
+                }
+            ],
+        };
+
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*'path' and 'paths' are mutually exclusive*");
+    }
+
+    [Fact]
+    public void Github_paths_with_duplicate_basenames_are_rejected()
+    {
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "x",
+                    Source = new GitHubSkillSource { Repo = "o/r", Paths = ["dir1/foo", "dir2/foo"] },
+                    Targets = ["./o"],
+                }
+            ],
+        };
+
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*basename 'foo'*");
+    }
+
+    [Fact]
+    public void Local_paths_with_duplicate_basenames_are_rejected()
+    {
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "x",
+                    Source = new LocalDirectorySkillSource { Paths = ["./a/skill", "./b/skill"] },
+                    Targets = ["./o"],
+                }
+            ],
+        };
+
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*basename 'skill'*");
+    }
+
     [Theory]
     [InlineData("../escape")]
     [InlineData("/absolute")]
     [InlineData("foo/../bar")]
-    public void Source_path_must_be_relative_and_safe(string path)
+    public void Source_path_must_be_relative_and_safe_for_github(string path)
     {
         var manifest = new ConduitManifest
         {
@@ -96,24 +201,18 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Owner = "o", Repo = "r", Path = path },
+                    Source = new GitHubSkillSource { Repo = "o/r", Path = path },
                     Targets = ["./o"],
                 }
             ],
         };
 
-        ManifestValidator.Validate(manifest).Should().ContainMatch("*repository-relative*");
+        var errors = ManifestValidator.Validate(manifest);
+        errors.Should().NotBeEmpty();
     }
 
     [Fact]
-    public void Valid_manifest_returns_no_errors()
-    {
-        var manifest = new ConduitManifest { Entries = [ValidEntry()] };
-        ManifestValidator.Validate(manifest).Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Local_source_requires_a_path()
+    public void Local_source_requires_at_least_one_path()
     {
         var manifest = new ConduitManifest
         {
@@ -122,17 +221,17 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new LocalDirectorySkillSource { Path = "" },
+                    Source = new LocalDirectorySkillSource(),
                     Targets = ["./o"],
                 }
             ],
         };
 
-        ManifestValidator.Validate(manifest).Should().ContainMatch("*source.path must be a non-empty string*");
+        ManifestValidator.Validate(manifest).Should().ContainMatch("*at least one*");
     }
 
     [Fact]
-    public void Local_source_with_a_path_is_accepted()
+    public void Local_source_with_path_is_accepted()
     {
         var manifest = new ConduitManifest
         {
@@ -147,6 +246,32 @@ public sealed class ManifestValidatorTests
             ],
         };
 
+        ManifestValidator.Validate(manifest).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Local_source_with_paths_array_is_accepted()
+    {
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "x",
+                    Source = new LocalDirectorySkillSource { Paths = ["./a", "./b"] },
+                    Targets = ["./o"],
+                }
+            ],
+        };
+
+        ManifestValidator.Validate(manifest).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Valid_manifest_returns_no_errors()
+    {
+        var manifest = new ConduitManifest { Entries = [ValidEntry()] };
         ManifestValidator.Validate(manifest).Should().BeEmpty();
     }
 }

@@ -4,9 +4,9 @@ namespace Zakira.Conduit.Manifest;
 ///     Locates a conduit manifest file on disk using the resolution order:
 ///     <list type="number">
 ///         <item><description>The explicit path provided by the caller.</description></item>
-///         <item><description><c>$XDG_CONFIG_HOME/conduit/conduit.json</c>.</description></item>
-///         <item><description><c>$HOME/.config/conduit/conduit.json</c> (XDG default fallback).</description></item>
-///         <item><description><c>%APPDATA%/conduit/conduit.json</c> (Windows fallback).</description></item>
+///         <item><description><c>$XDG_CONFIG_HOME/Zakira.Conduit/conduit.json</c>.</description></item>
+///         <item><description><c>$HOME/.config/Zakira.Conduit/conduit.json</c> (XDG default fallback).</description></item>
+///         <item><description><c>%APPDATA%/Zakira.Conduit/conduit.json</c> (Windows fallback).</description></item>
 ///         <item><description><c>./conduit.json</c> (current working directory).</description></item>
 ///     </list>
 /// </summary>

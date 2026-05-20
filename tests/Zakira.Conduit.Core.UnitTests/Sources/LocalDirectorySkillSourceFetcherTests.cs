@@ -23,9 +23,9 @@ public sealed class LocalDirectorySkillSourceFetcherTests
 
         await using var fetched = await fetcher.FetchAsync(source, context);
 
-        fetched.ContentDirectory.Should().Be(Path.GetFullPath(sourceDir));
+        fetched.Contents[0].ContentDirectory.Should().Be(Path.GetFullPath(sourceDir));
         fetched.ResolvedRef.Should().BeNull();
-        File.Exists(Path.Combine(fetched.ContentDirectory, "SKILL.md")).Should().BeTrue();
+        File.Exists(Path.Combine(fetched.Contents[0].ContentDirectory, "SKILL.md")).Should().BeTrue();
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class LocalDirectorySkillSourceFetcherTests
 
         await using var fetched = await fetcher.FetchAsync(source, context);
 
-        fetched.ContentDirectory.Should().Be(Path.GetFullPath(skillDir));
+        fetched.Contents[0].ContentDirectory.Should().Be(Path.GetFullPath(skillDir));
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class LocalDirectorySkillSourceFetcherTests
 
         await using var fetched = await fetcher.FetchAsync(source, context);
 
-        fetched.ContentDirectory.Should().Be(Path.GetFullPath(skill));
+        fetched.Contents[0].ContentDirectory.Should().Be(Path.GetFullPath(skill));
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class LocalDirectorySkillSourceFetcherTests
     {
         var fetcher = BuildFetcher();
         var context = new FetchContext(Path.Combine(Path.GetTempPath(), "x.json"));
-        var act = () => fetcher.FetchAsync(new GitHubSkillSource { Owner = "o", Repo = "r" }, context);
+        var act = () => fetcher.FetchAsync(new GitHubSkillSource { Repo = "o/r" }, context);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }

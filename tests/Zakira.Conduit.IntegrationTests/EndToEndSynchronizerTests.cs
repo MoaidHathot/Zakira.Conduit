@@ -38,8 +38,7 @@ public sealed class EndToEndSynchronizerTests
                     Name = "review",
                     Source = new GitHubSkillSource
                     {
-                        Owner = "acme",
-                        Repo = "skills",
+                        Repo = "acme/skills",
                         Path = "skills/review",
                         Branch = "main",
                     },
@@ -99,7 +98,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "skills",
-                    Source = new GitHubSkillSource { Owner = "acme", Repo = "skills", Branch = "v1" },
+                    Source = new GitHubSkillSource { Repo = "acme/skills", Branch = "v1" },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -111,7 +110,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "skills",
-                    Source = new GitHubSkillSource { Owner = "acme", Repo = "skills", Branch = "v2" },
+                    Source = new GitHubSkillSource { Repo = "acme/skills", Branch = "v2" },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -126,5 +125,99 @@ public sealed class EndToEndSynchronizerTests
         File.ReadAllText(tmp.Combine("dest", "skills", "SKILL.md")).Should().Be("v2");
         File.Exists(tmp.Combine("dest", "skills", "legacy.md")).Should().BeFalse("the staging-swap mirror must remove stale files");
         File.Exists(tmp.Combine("dest", "skills", "NEW.md")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Multi_path_github_source_lands_each_subpath_under_its_basename()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+
+        var payload = ZipballPayload.Build("acme-skills-abc", new Dictionary<string, string>
+        {
+            ["skills/review/SKILL.md"] = "review",
+            ["skills/tests/SKILL.md"] = "tests",
+            ["skills/refactor/SKILL.md"] = "refactor",
+            ["unrelated/file.md"] = "ignored",
+        });
+        server.MapZipball("acme", "skills", gitRef: null, payload);
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "anthropic-bundle",
+                    Source = new GitHubSkillSource
+                    {
+                        Repo = "acme/skills",
+                        Paths = ["skills/review", "skills/tests", "skills/refactor"],
+                    },
+                    Targets = [tmp.Combine("agent")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore(opts => opts.BaseAddress = server.BaseAddress);
+        var provider = services.BuildServiceProvider();
+        var sync = provider.GetRequiredService<IConduitSynchronizer>();
+
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions());
+        report.Succeeded.Should().BeTrue();
+
+        // Note: with multi-path, the entry name "anthropic-bundle" does NOT appear in the destination.
+        File.ReadAllText(tmp.Combine("agent", "review", "SKILL.md")).Should().Be("review");
+        File.ReadAllText(tmp.Combine("agent", "tests", "SKILL.md")).Should().Be("tests");
+        File.ReadAllText(tmp.Combine("agent", "refactor", "SKILL.md")).Should().Be("refactor");
+        Directory.Exists(tmp.Combine("agent", "anthropic-bundle")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Multi_path_local_source_lands_each_directory_under_its_basename()
+    {
+        using var tmp = new TempDir();
+
+        Directory.CreateDirectory(tmp.Combine("vendor", "code-review"));
+        await File.WriteAllTextAsync(tmp.Combine("vendor", "code-review", "SKILL.md"), "review");
+
+        Directory.CreateDirectory(tmp.Combine("vendor", "test-writer"));
+        await File.WriteAllTextAsync(tmp.Combine("vendor", "test-writer", "SKILL.md"), "tests");
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, "{}");
+
+        var manifest = new ConduitManifest
+        {
+            Entries =
+            [
+                new ConduitEntry
+                {
+                    Name = "house-bundle",
+                    Source = new LocalDirectorySkillSource
+                    {
+                        Paths = ["./vendor/code-review", "./vendor/test-writer"],
+                    },
+                    Targets = [tmp.Combine("agent")],
+                }
+            ],
+        };
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddConduitCore();
+        var sync = services.BuildServiceProvider().GetRequiredService<IConduitSynchronizer>();
+
+        var report = await sync.SyncAsync(manifest, manifestPath, new SyncOptions());
+        report.Succeeded.Should().BeTrue();
+
+        File.ReadAllText(tmp.Combine("agent", "code-review", "SKILL.md")).Should().Be("review");
+        File.ReadAllText(tmp.Combine("agent", "test-writer", "SKILL.md")).Should().Be("tests");
+        Directory.Exists(tmp.Combine("agent", "house-bundle")).Should().BeFalse();
     }
 }

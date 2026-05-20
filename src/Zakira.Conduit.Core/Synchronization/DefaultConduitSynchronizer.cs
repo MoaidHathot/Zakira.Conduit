@@ -9,7 +9,7 @@ namespace Zakira.Conduit.Synchronization;
 
 /// <summary>
 ///     Default <see cref="IConduitSynchronizer"/>. Orchestrates the per-entry
-///     pipeline: select fetcher → fetch → mirror to each target.
+///     pipeline: select fetcher → fetch → mirror each content unit to each target.
 /// </summary>
 public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 {
@@ -96,38 +96,55 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
             var fetchContext = new FetchContext(manifestFullPath);
             fetched = await fetcher.FetchAsync(entry.Source, fetchContext, cancellationToken).ConfigureAwait(false);
 
-            var fetchedFull = Path.GetFullPath(fetched.ContentDirectory);
+            // Per design: when there is exactly one content unit the entry name
+            // is the destination sub-directory; with two or more, each unit's
+            // suggested name becomes the destination and the entry name is
+            // metadata only (logs / --entry filtering).
+            var singleUnit = fetched.Contents.Count == 1;
 
-            var targetResults = new List<SyncTargetResult>(entry.Targets.Count);
-            foreach (var rawTarget in entry.Targets)
+            // capacity = N units * M targets
+            var targetResults = new List<SyncTargetResult>(fetched.Contents.Count * entry.Targets.Count);
+
+            foreach (var unit in fetched.Contents)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                var destName = singleUnit
+                    ? entry.Name
+                    : unit.SuggestedDestinationName
+                      ?? throw new InvalidOperationException(
+                          $"Source '{entry.Source.Kind}' returned multiple content units but failed to suggest a destination name for one of them.");
 
-                var resolvedParent = _pathResolver.Resolve(rawTarget, manifestDir);
-                var resolvedTarget = Path.Combine(resolvedParent, entry.Name);
+                var fetchedFull = Path.GetFullPath(unit.ContentDirectory);
 
-                try
+                foreach (var rawTarget in entry.Targets)
                 {
-                    GuardAgainstOverlap(fetchedFull, resolvedTarget);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                    if (options.DryRun)
+                    var resolvedParent = _pathResolver.Resolve(rawTarget, manifestDir);
+                    var resolvedTarget = Path.Combine(resolvedParent, destName);
+
+                    try
                     {
-                        _logger.LogInformation("[dry-run] Would mirror '{Source}' to '{Target}'", fetched.ContentDirectory, resolvedTarget);
-                        var fileCount = Directory.Exists(fetched.ContentDirectory)
-                            ? Directory.EnumerateFiles(fetched.ContentDirectory, "*", SearchOption.AllDirectories).Count()
-                            : 0;
-                        targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: fileCount, Error: null));
+                        GuardAgainstOverlap(fetchedFull, resolvedTarget);
+
+                        if (options.DryRun)
+                        {
+                            _logger.LogInformation("[dry-run] Would mirror '{Source}' to '{Target}'", unit.ContentDirectory, resolvedTarget);
+                            var fileCount = Directory.Exists(unit.ContentDirectory)
+                                ? Directory.EnumerateFiles(unit.ContentDirectory, "*", SearchOption.AllDirectories).Count()
+                                : 0;
+                            targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: fileCount, Error: null));
+                        }
+                        else
+                        {
+                            var written = await _mirror.MirrorAsync(unit.ContentDirectory, resolvedTarget, cancellationToken).ConfigureAwait(false);
+                            targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: written, Error: null));
+                        }
                     }
-                    else
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        var written = await _mirror.MirrorAsync(fetched.ContentDirectory, resolvedTarget, cancellationToken).ConfigureAwait(false);
-                        targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: written, Error: null));
+                        _logger.LogError(ex, "Failed to mirror entry '{Name}' into target '{Target}'", entry.Name, resolvedTarget);
+                        targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: false, FilesWritten: 0, Error: ex.Message));
                     }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(ex, "Failed to mirror entry '{Name}' into target '{Target}'", entry.Name, resolvedTarget);
-                    targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: false, FilesWritten: 0, Error: ex.Message));
                 }
             }
 

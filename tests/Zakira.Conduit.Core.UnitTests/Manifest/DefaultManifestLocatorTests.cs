@@ -38,7 +38,7 @@ public sealed class DefaultManifestLocatorTests
 
         var candidates = locator.EnumerateCandidates(explicitPath: null);
 
-        candidates[0].Should().Be(Path.Combine(env.GetEnvironmentVariable("XDG_CONFIG_HOME")!, "conduit", "conduit.json"));
+        candidates[0].Should().Be(Path.Combine(env.GetEnvironmentVariable("XDG_CONFIG_HOME")!, "Zakira.Conduit", "conduit.json"));
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class DefaultManifestLocatorTests
 
         var candidates = locator.EnumerateCandidates(explicitPath: null);
 
-        candidates.Should().Contain(Path.Combine(env.HomeDirectory, ".config", "conduit", "conduit.json"));
+        candidates.Should().Contain(Path.Combine(env.HomeDirectory, ".config", "Zakira.Conduit", "conduit.json"));
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class DefaultManifestLocatorTests
 
         var candidates = locator.EnumerateCandidates(explicitPath: null);
 
-        candidates.Should().Contain(@"C:\Users\me\AppData\Roaming\conduit\conduit.json");
+        candidates.Should().Contain(@"C:\Users\me\AppData\Roaming\Zakira.Conduit\conduit.json");
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class DefaultManifestLocatorTests
     public void Locate_returns_first_existing_candidate()
     {
         using var tmp = new TempDir();
-        var configDir = Path.Combine(tmp.Path, ".config", "conduit");
+        var configDir = Path.Combine(tmp.Path, ".config", "Zakira.Conduit");
         Directory.CreateDirectory(configDir);
         var manifestPath = Path.Combine(configDir, "conduit.json");
         File.WriteAllText(manifestPath, "{}");

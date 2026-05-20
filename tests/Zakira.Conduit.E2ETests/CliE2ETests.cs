@@ -66,8 +66,8 @@ public sealed class CliE2ETests
             {
               "version": 1,
               "entries": [
-                { "name": "alpha", "source": { "type": "github", "owner": "o", "repo": "r" }, "targets": ["./out1"] },
-                { "name": "beta",  "source": { "type": "github", "owner": "o", "repo": "r", "branch": "main" }, "targets": ["./out2"] }
+                { "name": "alpha", "source": { "type": "github", "repo": "o/r" }, "targets": ["./out1"] },
+                { "name": "beta",  "source": { "type": "github", "repo": "o/r", "branch": "main" }, "targets": ["./out2"] }
               ]
             }
             """);
@@ -100,7 +100,7 @@ public sealed class CliE2ETests
               "entries": [
                 {
                   "name": "demo",
-                  "source": { "type": "github", "owner": "acme", "repo": "skills" },
+                  "source": { "type": "github", "repo": "acme/skills" },
                   "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("a"))}}, {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("b"))}} ]
                 }
               ]
@@ -135,7 +135,7 @@ public sealed class CliE2ETests
             {
               "version": 1,
               "entries": [
-                { "name": "d", "source": { "type": "github", "owner": "o", "repo": "r" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("t"))}} ] }
+                { "name": "d", "source": { "type": "github", "repo": "o/r" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("t"))}} ] }
               ]
             }
             """);
@@ -164,7 +164,7 @@ public sealed class CliE2ETests
             {
               "version": 1,
               "entries": [
-                { "name": "x", "source": { "type": "github", "owner": "nope", "repo": "nope" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("t"))}} ] }
+                { "name": "x", "source": { "type": "github", "repo": "nope/nope" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("t"))}} ] }
               ]
             }
             """);
@@ -193,13 +193,13 @@ public sealed class CliE2ETests
         server.MapZipball("acme", "skills", gitRef: null, payload);
 
         var xdg = tmp.Combine("xdg");
-        Directory.CreateDirectory(Path.Combine(xdg, "conduit"));
-        var manifestPath = Path.Combine(xdg, "conduit", "conduit.json");
+        Directory.CreateDirectory(Path.Combine(xdg, "Zakira.Conduit"));
+        var manifestPath = Path.Combine(xdg, "Zakira.Conduit", "conduit.json");
         await File.WriteAllTextAsync(manifestPath, $$"""
             {
               "version": 1,
               "entries": [
-                { "name": "demo", "source": { "type": "github", "owner": "acme", "repo": "skills" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("dest"))}} ] }
+                { "name": "demo", "source": { "type": "github", "repo": "acme/skills" }, "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("dest"))}} ] }
               ]
             }
             """);
@@ -271,5 +271,126 @@ public sealed class CliE2ETests
 
         result.ExitCode.Should().Be(0);
         result.StdOut.Should().Contain("local:./vendor/skills/a");
+    }
+
+    [Fact]
+    public async Task sync_github_paths_mirrors_each_subpath_into_targets()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+
+        var payload = ZipballPayload.Build("acme-skills-multi", new Dictionary<string, string>
+        {
+            ["skills/code-review/SKILL.md"] = "review",
+            ["skills/test-writer/SKILL.md"] = "tests",
+            ["skills/refactor/SKILL.md"] = "refactor",
+            ["unrelated/IGNORE.md"] = "x",
+        });
+        server.MapZipball("acme", "skills", gitRef: null, payload);
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, $$"""
+            {
+              "version": 1,
+              "entries": [
+                {
+                  "name": "anthropic-bundle",
+                  "source": {
+                    "type": "github",
+                    "repo": "https://github.com/acme/skills",
+                    "paths": ["skills/code-review", "skills/test-writer", "skills/refactor"]
+                  },
+                  "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("agent"))}} ]
+                }
+              ]
+            }
+            """);
+
+        var env = new Dictionary<string, string?>
+        {
+            ["CONDUIT_GITHUB_API_BASE"] = server.BaseAddress.ToString(),
+        };
+
+        var result = await ConduitCli.RunAsync(["sync", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"sync should succeed. stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        File.ReadAllText(tmp.Combine("agent", "code-review", "SKILL.md")).Should().Be("review");
+        File.ReadAllText(tmp.Combine("agent", "test-writer", "SKILL.md")).Should().Be("tests");
+        File.ReadAllText(tmp.Combine("agent", "refactor", "SKILL.md")).Should().Be("refactor");
+        // Entry name does NOT appear in destinations under multi-path mode.
+        Directory.Exists(tmp.Combine("agent", "anthropic-bundle")).Should().BeFalse();
+        // And only the requested sub-paths were extracted.
+        Directory.Exists(tmp.Combine("agent", "unrelated")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task sync_local_paths_mirrors_each_directory_under_its_basename()
+    {
+        using var tmp = new TempDir();
+
+        Directory.CreateDirectory(tmp.Combine("source", "alpha"));
+        await File.WriteAllTextAsync(tmp.Combine("source", "alpha", "SKILL.md"), "alpha");
+
+        Directory.CreateDirectory(tmp.Combine("source", "beta"));
+        await File.WriteAllTextAsync(tmp.Combine("source", "beta", "SKILL.md"), "beta");
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, $$"""
+            {
+              "version": 1,
+              "entries": [
+                {
+                  "name": "bundle",
+                  "source": {
+                    "type": "local",
+                    "paths": ["./source/alpha", "./source/beta"]
+                  },
+                  "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("agent"))}} ]
+                }
+              ]
+            }
+            """);
+
+        var result = await ConduitCli.RunAsync(["sync", "--manifest", manifestPath]);
+
+        result.ExitCode.Should().Be(0, because: $"sync should succeed. stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+        File.ReadAllText(tmp.Combine("agent", "alpha", "SKILL.md")).Should().Be("alpha");
+        File.ReadAllText(tmp.Combine("agent", "beta", "SKILL.md")).Should().Be("beta");
+        Directory.Exists(tmp.Combine("agent", "bundle")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task sync_accepts_github_url_form_in_the_repo_field()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+
+        var payload = ZipballPayload.Build("acme-skills-url", new Dictionary<string, string>
+        {
+            ["SKILL.md"] = "via-url",
+        });
+        server.MapZipball("acme", "skills", gitRef: null, payload);
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, $$"""
+            {
+              "version": 1,
+              "entries": [
+                {
+                  "name": "demo",
+                  "source": { "type": "github", "repo": "https://github.com/acme/skills.git" },
+                  "targets": [ {{System.Text.Json.JsonSerializer.Serialize(tmp.Combine("dest"))}} ]
+                }
+              ]
+            }
+            """);
+
+        var env = new Dictionary<string, string?> { ["CONDUIT_GITHUB_API_BASE"] = server.BaseAddress.ToString() };
+
+        var result = await ConduitCli.RunAsync(["sync", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+        File.ReadAllText(tmp.Combine("dest", "demo", "SKILL.md")).Should().Be("via-url");
     }
 }

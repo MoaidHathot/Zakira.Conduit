@@ -28,7 +28,7 @@
         "name": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._-]+$",
-          "description": "Unique entry name. Used as the sub-directory name inside each target."
+          "description": "Unique entry identifier. Used as the destination sub-directory name when the source produces exactly one content unit; used only for filtering / logs when the source produces multiple units."
         },
         "description": { "type": "string" },
         "disabled": { "type": "boolean", "default": false },
@@ -48,15 +48,24 @@
     },
     "githubSource": {
       "type": "object",
-      "required": ["type", "owner", "repo"],
+      "required": ["type", "repo"],
       "additionalProperties": false,
       "properties": {
         "type": { "const": "github" },
-        "owner": { "type": "string", "minLength": 1 },
-        "repo": { "type": "string", "minLength": 1 },
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository identifier. Accepts a slug (owner/repo), a github.com URL, or an SSH-style reference (git@github.com:owner/repo[.git])."
+        },
         "path": {
           "type": "string",
-          "description": "Optional repository-relative sub-path. Forward slashes."
+          "description": "Optional single sub-path. Mutually exclusive with 'paths'."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Optional list of sub-paths. Mutually exclusive with 'path'. With one element the destination subdirectory uses the entry name; with two or more, each sub-path mirrors to its basename and the entry name is metadata only."
         },
         "branch": {
           "type": "string",
@@ -68,20 +77,36 @@
         }
       },
       "not": {
-        "required": ["branch", "commit"]
+        "anyOf": [
+          { "required": ["branch", "commit"] },
+          { "required": ["path", "paths"] }
+        ]
       }
     },
     "localSource": {
       "type": "object",
-      "required": ["type", "path"],
+      "required": ["type"],
       "additionalProperties": false,
       "properties": {
         "type": { "const": "local" },
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "Local directory whose contents are mirrored. Absolute, or relative to the manifest's directory. Supports ~ and environment variables."
+          "description": "Single source directory. Mutually exclusive with 'paths'."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Multiple source directories. Mutually exclusive with 'path'."
         }
+      },
+      "anyOf": [
+        { "required": ["path"] },
+        { "required": ["paths"] }
+      ],
+      "not": {
+        "required": ["path", "paths"]
       }
     }
   }

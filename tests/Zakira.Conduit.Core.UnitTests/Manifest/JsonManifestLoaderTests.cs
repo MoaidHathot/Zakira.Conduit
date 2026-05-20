@@ -14,8 +14,7 @@ public sealed class JsonManifestLoaderTests
               "name": "code-review",
               "source": {
                 "type": "github",
-                "owner": "anthropics",
-                "repo": "skills",
+                "repo": "anthropics/skills",
                 "path": "code-review",
                 "branch": "main"
               },
@@ -43,8 +42,10 @@ public sealed class JsonManifestLoaderTests
         entry.Targets.Should().ContainSingle().Which.Should().Be("~/.config/agents/skills");
 
         var github = entry.Source.Should().BeOfType<GitHubSkillSource>().Subject;
+        github.Repo.Should().Be("anthropics/skills");
         github.Owner.Should().Be("anthropics");
-        github.Repo.Should().Be("skills");
+        github.RepoName.Should().Be("skills");
+        github.Slug.Should().Be("anthropics/skills");
         github.Path.Should().Be("code-review");
         github.Branch.Should().Be("main");
         github.ResolvedRef.Should().Be("main");
@@ -120,7 +121,7 @@ public sealed class JsonManifestLoaderTests
               "entries": [
                 {
                   "name": "",
-                  "source": { "type": "github", "owner": "o", "repo": "r", "commit": "abc", "branch": "main" },
+                  "source": { "type": "github", "repo": "o/r", "commit": "abc", "branch": "main" },
                   "targets": []
                 }
               ]
@@ -148,7 +149,7 @@ public sealed class JsonManifestLoaderTests
               "entries": [
                 {
                   "name": "x",
-                  "source": { "type": "github", "owner": "o", "repo": "r" },
+                  "source": { "type": "github", "repo": "o/r" },
                   "targets": ["./out"],
                 }
               ],

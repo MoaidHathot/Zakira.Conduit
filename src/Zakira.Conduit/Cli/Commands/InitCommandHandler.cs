@@ -7,7 +7,7 @@ namespace Zakira.Conduit.Cli.Commands;
 
 /// <summary>
 ///     Implements the <c>init</c> command. Writes a starter manifest at the
-///     resolved path (explicit, or <c>$XDG_CONFIG_HOME/conduit/conduit.json</c>).
+///     resolved path (explicit, or <c>$XDG_CONFIG_HOME/Zakira.Conduit/conduit.json</c>).
 /// </summary>
 internal sealed class InitCommandHandler
 {
@@ -52,9 +52,15 @@ internal sealed class InitCommandHandler
 
     private string ResolveTargetPath(string? manifest)
     {
+        var raw = ResolveRawPath(manifest);
+        return Path.GetFullPath(raw);
+    }
+
+    private string ResolveRawPath(string? manifest)
+    {
         if (!string.IsNullOrWhiteSpace(manifest))
         {
-            return Path.GetFullPath(manifest);
+            return manifest;
         }
 
         var xdg = _environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
@@ -80,8 +86,7 @@ internal sealed class InitCommandHandler
                     Description = "Replace me. Each entry mirrors a remote skill source into one or more local target directories.",
                     Source = new GitHubSkillSource
                     {
-                        Owner = "owner",
-                        Repo = "repo",
+                        Repo = "owner/repo",
                         Path = "path/inside/repo",
                         Branch = "main",
                     },

@@ -19,7 +19,7 @@ public sealed class DefaultSkillSourceFetcherRegistryTests
         var fetcher = new StubFetcher("github");
         var registry = new DefaultSkillSourceFetcherRegistry([fetcher]);
 
-        registry.GetFetcher(new GitHubSkillSource { Owner = "o", Repo = "r" }).Should().BeSameAs(fetcher);
+        registry.GetFetcher(new GitHubSkillSource { Repo = "o/r" }).Should().BeSameAs(fetcher);
     }
 
     [Fact]

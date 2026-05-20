@@ -114,7 +114,7 @@ internal static class CommandTreeBuilder
             Description = "Overwrite an existing manifest if one is present at the target path.",
         };
 
-        var command = new Command("init", "Create a starter conduit.json manifest. Writes to --manifest, or to $XDG_CONFIG_HOME/conduit/conduit.json.");
+        var command = new Command("init", "Create a starter conduit.json manifest. Writes to --manifest, or to $XDG_CONFIG_HOME/Zakira.Conduit/conduit.json.");
         command.Options.Add(forceOption);
 
         command.SetAction((parseResult, cancellationToken) =>

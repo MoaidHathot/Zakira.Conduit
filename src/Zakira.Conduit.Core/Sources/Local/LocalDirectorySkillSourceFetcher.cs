@@ -7,10 +7,10 @@ namespace Zakira.Conduit.Sources.Local;
 /// <summary>
 ///     <see cref="ISkillSourceFetcher"/> for <see cref="LocalDirectorySkillSource"/>.
 ///     <para>
-///         The source directory is reused directly &mdash; no copy is made and
-///         no cleanup is performed on dispose &mdash; because the
+///         Source directories are reused directly &mdash; no copy is made and
+///         no cleanup is performed on dispose &mdash; because
 ///         <see cref="Mirroring.IDirectoryMirror"/> only reads from the content
-///         directory it is handed.
+///         directories it is handed.
 ///     </para>
 /// </summary>
 public sealed class LocalDirectorySkillSourceFetcher : ISkillSourceFetcher
@@ -41,18 +41,32 @@ public sealed class LocalDirectorySkillSourceFetcher : ISkillSourceFetcher
             throw new ArgumentException($"Expected a {nameof(LocalDirectorySkillSource)} but got '{source.GetType().Name}'.", nameof(source));
         }
 
-        var resolved = _pathResolver.Resolve(local.Path, context.ManifestDirectory);
-
-        if (!Directory.Exists(resolved))
+        var effective = local.EffectivePaths;
+        if (effective.Count == 0)
         {
-            throw new LocalSourceNotFoundException($"Local source directory does not exist: '{resolved}' (resolved from '{local.Path}').", resolved);
+            throw new ArgumentException("Local source must specify at least one path.", nameof(source));
         }
 
-        _logger.LogInformation("Using local source: {Path}", resolved);
+        var contents = new List<FetchedContent>(effective.Count);
 
-        // No cleanup callback: we don't own the user's directory.
+        foreach (var rawPath in effective)
+        {
+            var resolved = _pathResolver.Resolve(rawPath, context.ManifestDirectory);
+
+            if (!Directory.Exists(resolved))
+            {
+                throw new LocalSourceNotFoundException($"Local source directory does not exist: '{resolved}' (resolved from '{rawPath}').", resolved);
+            }
+
+            _logger.LogInformation("Using local source: {Path}", resolved);
+
+            var suggestedName = effective.Count > 1 ? Path.GetFileName(resolved.TrimEnd(Path.DirectorySeparatorChar)) : null;
+            contents.Add(new FetchedContent(resolved, suggestedName));
+        }
+
+        // No cleanup callback: we don't own user directories.
         return Task.FromResult(new FetchedSource(
-            contentDirectory: resolved,
+            contents: contents,
             source: source,
             resolvedRef: null,
             cleanup: null));

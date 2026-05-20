@@ -49,12 +49,13 @@ public sealed class SampleManifestTests
         var result = await ConduitCli.RunAsync(["list", "--manifest", manifestPath]);
 
         result.ExitCode.Should().Be(0);
-        result.StdOut.Should().Contain("code-review");
+        result.StdOut.Should().Contain("PowerReview");
         result.StdOut.Should().Contain("internal-runbooks");
         result.StdOut.Should().Contain("local-skill-sample");
+        result.StdOut.Should().Contain("local-skill-bundle");
         result.StdOut.Should().Contain("experimental-thing");
         result.StdOut.Should().Contain("(disabled)");
-        result.StdOut.Should().Contain("github:anthropics/skills");
+        result.StdOut.Should().Contain("github:MoaidHathot/PowerReview");
         result.StdOut.Should().Contain("local:./local-skill-sample");
     }
 }

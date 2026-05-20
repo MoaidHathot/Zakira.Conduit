@@ -43,7 +43,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "alpha",
-                    Source = new GitHubSkillSource { Owner = "o", Repo = "r" },
+                    Source = new GitHubSkillSource { Repo = "o/r" },
                     Targets = [tmp.Combine("targetA"), tmp.Combine("targetB")],
                 }
             ],
@@ -74,7 +74,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "alpha",
-                    Source = new GitHubSkillSource { Owner = "o", Repo = "r" },
+                    Source = new GitHubSkillSource { Repo = "o/r" },
                     Targets = [tmp.Combine("target")],
                 }
             ],
@@ -100,7 +100,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "skipme",
-                    Source = new GitHubSkillSource { Owner = "o", Repo = "r" },
+                    Source = new GitHubSkillSource { Repo = "o/r" },
                     Targets = [tmp.Combine("t")],
                     Disabled = true,
                 }
@@ -126,8 +126,8 @@ public sealed class DefaultConduitSynchronizerTests
         {
             Entries =
             [
-                new ConduitEntry { Name = "alpha", Source = new GitHubSkillSource { Owner = "o", Repo = "r" }, Targets = [tmp.Combine("t")] },
-                new ConduitEntry { Name = "beta",  Source = new GitHubSkillSource { Owner = "o", Repo = "r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "alpha", Source = new GitHubSkillSource { Repo = "o/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "beta",  Source = new GitHubSkillSource { Repo = "o/r" }, Targets = [tmp.Combine("t")] },
             ],
         };
 
@@ -156,8 +156,8 @@ public sealed class DefaultConduitSynchronizerTests
         {
             Entries =
             [
-                new ConduitEntry { Name = "fails", Source = new GitHubSkillSource { Owner = "boom", Repo = "r" }, Targets = [tmp.Combine("t")] },
-                new ConduitEntry { Name = "ok",    Source = new GitHubSkillSource { Owner = "o", Repo = "r" },    Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "fails", Source = new GitHubSkillSource { Repo = "boom/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "ok",    Source = new GitHubSkillSource { Repo = "o/r" },    Targets = [tmp.Combine("t")] },
             ],
         };
 
@@ -189,8 +189,8 @@ public sealed class DefaultConduitSynchronizerTests
         {
             Entries =
             [
-                new ConduitEntry { Name = "fails", Source = new GitHubSkillSource { Owner = "boom", Repo = "r" }, Targets = [tmp.Combine("t")] },
-                new ConduitEntry { Name = "ok",    Source = new GitHubSkillSource { Owner = "o", Repo = "r" },    Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "fails", Source = new GitHubSkillSource { Repo = "boom/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "ok",    Source = new GitHubSkillSource { Repo = "o/r" },    Targets = [tmp.Combine("t")] },
             ],
         };
 
@@ -234,7 +234,7 @@ public sealed class DefaultConduitSynchronizerTests
                 {
                     // Target = parent of source, with entry name = "src" -> target+name == source dir.
                     Name = "src",
-                    Source = new GitHubSkillSource { Owner = "o", Repo = "r" },
+                    Source = new GitHubSkillSource { Repo = "o/r" },
                     Targets = [tmp.Path],
                 }
             ],
@@ -255,7 +255,7 @@ public sealed class DefaultConduitSynchronizerTests
         public string SourceKind => "github";
 
         public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new FetchedSource(directory, source, resolvedRef: null, cleanup: null));
+            Task.FromResult(FetchedSource.FromSingleDirectory(directory, source, resolvedRef: null, cleanup: null));
     }
 
     private sealed class ThrowingFetcher : ISkillSourceFetcher
@@ -272,7 +272,7 @@ public sealed class DefaultConduitSynchronizerTests
             var dir = Path.Combine(Path.GetTempPath(), "conduit-throwfetcher", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             File.WriteAllText(Path.Combine(dir, "SKILL.md"), "ok");
-            return Task.FromResult(new FetchedSource(dir, source, resolvedRef: null, cleanup: () =>
+            return Task.FromResult(FetchedSource.FromSingleDirectory(dir, source, resolvedRef: null, cleanup: () =>
             {
                 try { Directory.Delete(dir, recursive: true); } catch { }
                 return ValueTask.CompletedTask;

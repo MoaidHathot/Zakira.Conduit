@@ -7,14 +7,14 @@ public static class ManifestNames
 {
     /// <summary>
     ///     The default file name of the conduit manifest, expected at
-    ///     <c>$XDG_CONFIG_HOME/conduit/conduit.json</c>.
+    ///     <c>$XDG_CONFIG_HOME/Zakira.Conduit/conduit.json</c>.
     /// </summary>
     public const string DefaultFileName = "conduit.json";
 
     /// <summary>
     ///     The directory name (under <c>$XDG_CONFIG_HOME</c>) that contains the manifest.
     /// </summary>
-    public const string ConfigDirectoryName = "conduit";
+    public const string ConfigDirectoryName = "Zakira.Conduit";
 
     /// <summary>
     ///     The current manifest schema version.

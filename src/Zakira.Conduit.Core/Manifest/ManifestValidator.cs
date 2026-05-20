@@ -92,24 +92,11 @@ public static class ManifestValidator
         }
     }
 
-    private static void ValidateLocalSource(LocalDirectorySkillSource source, string prefix, List<string> errors)
-    {
-        if (string.IsNullOrWhiteSpace(source.Path))
-        {
-            errors.Add($"{prefix}.source.path must be a non-empty string for local sources.");
-        }
-    }
-
     private static void ValidateGitHubSource(GitHubSkillSource source, string prefix, List<string> errors)
     {
-        if (string.IsNullOrWhiteSpace(source.Owner))
+        if (!GitHubRepoReference.TryParse(source.Repo, out _, out _, out var parseError))
         {
-            errors.Add($"{prefix}.source.owner must be a non-empty string for github sources.");
-        }
-
-        if (string.IsNullOrWhiteSpace(source.Repo))
-        {
-            errors.Add($"{prefix}.source.repo must be a non-empty string for github sources.");
+            errors.Add($"{prefix}.source.repo: {parseError}");
         }
 
         if (!string.IsNullOrEmpty(source.Commit) && !string.IsNullOrEmpty(source.Branch))
@@ -117,9 +104,83 @@ public static class ManifestValidator
             errors.Add($"{prefix}.source: 'commit' and 'branch' are mutually exclusive.");
         }
 
-        if (source.Path is not null && (source.Path.StartsWith('/') || source.Path.Contains("..", StringComparison.Ordinal)))
+        if (source.Path is not null && source.Paths is { Count: > 0 })
         {
-            errors.Add($"{prefix}.source.path '{source.Path}' must be a repository-relative path without '..' segments.");
+            errors.Add($"{prefix}.source: 'path' and 'paths' are mutually exclusive.");
+        }
+
+        ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: true, errors);
+    }
+
+    private static void ValidateLocalSource(LocalDirectorySkillSource source, string prefix, List<string> errors)
+    {
+        if (source.Path is not null && source.Paths is { Count: > 0 })
+        {
+            errors.Add($"{prefix}.source: 'path' and 'paths' are mutually exclusive.");
+        }
+
+        if (source.EffectivePaths.Count == 0)
+        {
+            errors.Add($"{prefix}.source: a local source must declare at least one 'path' or one 'paths' entry.");
+        }
+
+        ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: false, errors);
+    }
+
+    /// <summary>
+    ///     Common validation for an effective list of paths: non-empty entries,
+    ///     no <c>..</c> for repo-relative paths, no leading <c>/</c> for
+    ///     repo-relative paths, and (when count &gt; 1) unique basenames so
+    ///     destination directories never collide.
+    /// </summary>
+    private static void ValidateSubPaths(IReadOnlyList<string> paths, string prefix, bool requireRepoRelative, List<string> errors)
+    {
+        if (paths.Count == 0)
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var i = 0; i < paths.Count; i++)
+        {
+            var p = paths[i];
+            var slot = paths.Count == 1 && prefix.EndsWith(".source", StringComparison.Ordinal)
+                ? $"{prefix}.path"
+                : $"{prefix}.paths[{i}]";
+
+            if (string.IsNullOrWhiteSpace(p))
+            {
+                errors.Add($"{slot} must be a non-empty string.");
+                continue;
+            }
+
+            if (requireRepoRelative)
+            {
+                if (p.StartsWith('/'))
+                {
+                    errors.Add($"{slot} '{p}' must be a repository-relative path (no leading '/').");
+                }
+
+                if (p.Contains("..", StringComparison.Ordinal))
+                {
+                    errors.Add($"{slot} '{p}' must not contain '..' segments.");
+                }
+            }
+
+            // Basename collision check across multiple paths.
+            if (paths.Count > 1)
+            {
+                var normalized = p.Replace('\\', '/').TrimEnd('/');
+                var slashIndex = normalized.LastIndexOf('/');
+                var basename = slashIndex < 0 ? normalized : normalized[(slashIndex + 1)..];
+                basename = basename.Trim();
+
+                if (!string.IsNullOrEmpty(basename) && !seen.Add(basename))
+                {
+                    errors.Add($"{prefix}.paths: multiple entries share the basename '{basename}', which would collide in the target directory.");
+                }
+            }
         }
     }
 

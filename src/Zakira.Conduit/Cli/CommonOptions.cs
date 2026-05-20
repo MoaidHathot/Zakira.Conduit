@@ -9,7 +9,7 @@ internal static class CommonOptions
 {
     public static Option<FileInfo?> Manifest { get; } = new("--manifest", "-m")
     {
-        Description = "Path to the conduit manifest. When omitted, the file is discovered via $XDG_CONFIG_HOME/conduit/conduit.json (and standard fallbacks).",
+        Description = "Path to the conduit manifest. When omitted, the file is discovered via $XDG_CONFIG_HOME/Zakira.Conduit/conduit.json (and standard fallbacks).",
     };
 
     public static Option<string> Verbosity { get; } = new("--verbosity")

@@ -3,11 +3,16 @@ using System.Text.Json.Serialization;
 namespace Zakira.Conduit.Manifest;
 
 /// <summary>
-///     A skill source backed by a directory on the local filesystem. The
-///     directory is mirrored as-is into each target.
+///     A skill source backed by one or more directories on the local filesystem.
 ///     <para>
-///         <see cref="Path"/> may be absolute, or relative to the manifest's
-///         directory, and supports <c>~</c> and environment-variable expansion.
+///         Paths may be absolute, or relative to the manifest's directory, and
+///         support <c>~</c> and environment-variable expansion.
+///     </para>
+///     <para>
+///         <list type="bullet">
+///             <item><description>If exactly one path resolves, it is mirrored to <c>&lt;target&gt;/&lt;entry.name&gt;/</c>.</description></item>
+///             <item><description>If two or more paths resolve, each is mirrored to <c>&lt;target&gt;/&lt;basename(path)&gt;/</c>; the entry name drops out of the destination.</description></item>
+///         </list>
 ///     </para>
 /// </summary>
 public sealed record LocalDirectorySkillSource : ISkillSource
@@ -18,12 +23,30 @@ public sealed record LocalDirectorySkillSource : ISkillSource
     public const string TypeDiscriminator = "local";
 
     /// <summary>
-    ///     The local directory whose contents are mirrored. Required.
+    ///     Single source directory. Syntactic sugar for a one-element
+    ///     <see cref="Paths"/>. Mutually exclusive with <see cref="Paths"/>.
     /// </summary>
     [JsonPropertyName("path")]
-    public required string Path { get; init; }
+    public string? Path { get; init; }
+
+    /// <summary>
+    ///     One or more source directories. Mutually exclusive with <see cref="Path"/>.
+    /// </summary>
+    [JsonPropertyName("paths")]
+    public IReadOnlyList<string>? Paths { get; init; }
 
     /// <inheritdoc />
     [JsonIgnore]
     public string Kind => TypeDiscriminator;
+
+    /// <summary>
+    ///     Effective list of source directories. Returns <see cref="Paths"/>
+    ///     when set, otherwise a one-element list containing <see cref="Path"/>,
+    ///     otherwise an empty list (which is a validation error).
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> EffectivePaths =>
+        Paths is { Count: > 0 } p
+            ? p
+            : (string.IsNullOrWhiteSpace(Path) ? Array.Empty<string>() : new[] { Path });
 }
