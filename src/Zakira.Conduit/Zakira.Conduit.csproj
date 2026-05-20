@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>conduit</ToolCommandName>
     <PackageId>Zakira.Conduit</PackageId>
-    <Description>A .NET global tool that synchronizes agent skills from remote sources (GitHub, ...) into one or more local target directories, based on a manifest file.</Description>
+    <Description>A .NET global tool that mirrors agent skills from GitHub or local directories into your agent folders, driven by a conduit.json manifest.</Description>
     <PackageTags>conduit;agent-skills;sync;cli;dotnet-tool;agents</PackageTags>
 
     <RollForward>LatestMajor</RollForward>

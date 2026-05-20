@@ -5,7 +5,7 @@
     <AssemblyName>Zakira.Conduit.Core</AssemblyName>
     <IsPackable>true</IsPackable>
     <PackageId>Zakira.Conduit.Core</PackageId>
-    <Description>Core library for Zakira.Conduit: manifest model, source abstractions and synchronization engine for syncing agent skills from remote sources to local directories.</Description>
+    <Description>Core library for Zakira.Conduit: manifest model, source abstractions, and synchronization engine that mirror agent skills from GitHub or local directories into your agent folders.</Description>
     <PackageTags>conduit;agent-skills;sync;cli;agents</PackageTags>
   </PropertyGroup>
 
