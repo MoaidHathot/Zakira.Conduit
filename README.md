@@ -417,6 +417,24 @@ $env:NUGET_API_KEY = 'oy2abc...'
 ./pack.ps1 -Push
 ```
 
+### Versioning
+
+Every package, assembly, and file in this repository ships with the **same version**, stamped from a single line in [`Directory.Build.props`](./Directory.Build.props):
+
+```xml
+<VersionPrefix>0.1.0</VersionPrefix>
+```
+
+To cut a release:
+
+1. Edit that number.
+2. Commit and push.
+3. Run `./pack.ps1 -Push`.
+
+`pack.ps1` intentionally does **not** expose a `-Version` override. The only way to change what gets shipped is to change the file. That keeps git history, NuGet, and the embedded assembly version in lock-step, and prevents accidental publishes whose version isn't recorded anywhere.
+
+If a new packable project is added later it inherits the same `VersionPrefix` automatically &mdash; no per-project version is ever declared.
+
 The integration & E2E tests use [`System.Net.HttpListener`](https://learn.microsoft.com/dotnet/api/system.net.httplistener) to stand up an in-process server that emulates GitHub's `zipball` endpoint, so they run offline and are deterministic.
 
 ---

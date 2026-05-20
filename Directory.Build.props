@@ -17,6 +17,21 @@
     <NoWarn>$(NoWarn);CS1591;CA1848;CA1873</NoWarn>
   </PropertyGroup>
 
+  <PropertyGroup Label="Versioning">
+    <!--
+      Single source of truth for the version stamped on every produced NuGet
+      package, assembly, and file. Every packable project in this repository
+      releases in lockstep at the same version.
+
+      To cut a release, edit this number, commit, push, then run ./pack.ps1
+      (or ./pack.ps1 -Push). The release script intentionally does NOT expose
+      a -Version override: the only way to change what gets shipped is to
+      change this file. That keeps git history, NuGet, and the assembly
+      version in sync, and prevents accidental untracked publishes.
+    -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+
   <PropertyGroup Label="Repository metadata">
     <Authors>Zakira</Authors>
     <Company>Zakira</Company>
