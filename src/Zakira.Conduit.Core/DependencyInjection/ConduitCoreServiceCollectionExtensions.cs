@@ -6,7 +6,10 @@ using Zakira.Conduit.Manifest;
 using Zakira.Conduit.Mirroring;
 using Zakira.Conduit.Paths;
 using Zakira.Conduit.Sources;
+using Zakira.Conduit.Sources.Azdo;
+using Zakira.Conduit.Sources.Azdo.Credentials;
 using Zakira.Conduit.Sources.GitHub;
+using Zakira.Conduit.Sources.Inference;
 using Zakira.Conduit.Sources.Local;
 using Zakira.Conduit.Synchronization;
 
@@ -30,7 +33,8 @@ public static class ConduitCoreServiceCollectionExtensions
         services.TryAddSingleton<IEnvironment, SystemEnvironment>();
 
         services.TryAddSingleton<IManifestLocator, DefaultManifestLocator>();
-        services.TryAddSingleton<IManifestLoader, JsonManifestLoader>();
+        services.TryAddSingleton<IManifestLoader>(sp =>
+            new JsonManifestLoader(sp.GetService<SkillSourceInferenceCoordinator>()));
         services.TryAddSingleton<IManifestWriter, JsonNodeManifestWriter>();
         services.TryAddSingleton<IPathResolver, DefaultPathResolver>();
         services.TryAddSingleton<IDirectoryMirror, AtomicDirectoryMirror>();
@@ -40,6 +44,8 @@ public static class ConduitCoreServiceCollectionExtensions
 
         services.AddGitHubSkillSource(configureGitHub);
         services.AddLocalDirectorySkillSource();
+        services.AddAzdoSkillSource();
+        services.AddSkillSourceInference();
 
         return services;
     }
@@ -108,6 +114,70 @@ public static class ConduitCoreServiceCollectionExtensions
             });
 
         services.AddSingleton<ISkillSourceFetcher, GitHubSkillSourceFetcher>();
+
+        return services;
+    }
+
+    /// <summary>
+    ///     Registers the Azure DevOps <see cref="ISkillSourceFetcher"/> and its
+    ///     <see cref="HttpClient"/>s with sensible defaults. Safe to call
+    ///     standalone if you only want the AzDO source.
+    /// </summary>
+    public static IServiceCollection AddAzdoSkillSource(this IServiceCollection services, Action<AzdoFetcherOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton<IEnvironment, SystemEnvironment>();
+
+        services.AddOptions<AzdoFetcherOptions>();
+        if (configure is not null)
+        {
+            services.Configure(configure);
+        }
+
+        // Credential providers registered in canonical order; the chain itself
+        // is driven by AzdoSkillSource.ResolvedAuthChain at call time.
+        services.TryAddSingleton<IProcessRunner, SystemProcessRunner>();
+        services.AddSingleton<IAzdoCredentialProvider, EnvironmentPatCredentialProvider>();
+        services.AddSingleton<IAzdoCredentialProvider, AzCliCredentialProvider>();
+        services.AddSingleton<IAzdoCredentialProvider, ExplicitPatCredentialProvider>();
+        services.AddSingleton<IAzdoCredentialProvider, AnonymousCredentialProvider>();
+        services.AddSingleton<ChainedAzdoCredentialProvider>();
+
+        services.AddHttpClient<IAzdoRefResolver, AzdoRefResolver>()
+            .ConfigureHttpClient(static (sp, client) =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(60);
+            });
+
+        services.AddHttpClient<IAzdoItemsArchiveDownloader, AzdoItemsArchiveDownloader>()
+            .ConfigureHttpClient(static (sp, client) =>
+            {
+                client.Timeout = TimeSpan.FromMinutes(5);
+            });
+
+        services.AddSingleton<ISkillSourceFetcher, AzdoSkillSourceFetcher>();
+
+        return services;
+    }
+
+    /// <summary>
+    ///     Registers the URI-shape inference pipeline that lets manifest
+    ///     entries use <c>{ "source": { "type": "uri", "uri": "..." } }</c>
+    ///     and have the concrete kind (<c>github</c>, <c>azdo</c>,
+    ///     <c>local</c>, ...) chosen automatically at load time.
+    /// </summary>
+    public static IServiceCollection AddSkillSourceInference(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Order matters: local takes precedence so a './something' that
+        // happens to contain 'github.com' (unlikely but possible) is still
+        // resolved as a local path.
+        services.AddSingleton<ISkillSourceInferrer, LocalDirectorySkillSourceInferrer>();
+        services.AddSingleton<ISkillSourceInferrer, GitHubSkillSourceInferrer>();
+        services.AddSingleton<ISkillSourceInferrer, AzdoSkillSourceInferrer>();
+        services.AddSingleton<SkillSourceInferenceCoordinator>();
 
         return services;
     }

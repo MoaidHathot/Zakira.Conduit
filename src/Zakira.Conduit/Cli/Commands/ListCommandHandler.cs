@@ -63,6 +63,7 @@ internal sealed class ListCommandHandler
             {
                 GitHubSkillSource gh => SummarizeGitHub(gh),
                 LocalDirectorySkillSource local => SummarizeLocal(local),
+                AzdoSkillSource azdo => SummarizeAzdo(azdo),
                 _ => entry.Source.Kind,
             };
 
@@ -132,4 +133,22 @@ internal sealed class ListCommandHandler
 
     private static string FormatPathSpec(PathSpec spec) =>
         string.IsNullOrWhiteSpace(spec.As) ? spec.Path : $"{spec.Path} as {spec.As}";
+
+    private static string SummarizeAzdo(AzdoSkillSource azdo)
+    {
+        var refPart = azdo.Commit is not null ? $"@{azdo.Commit}"
+            : azdo.Tag is not null ? $"@tag:{azdo.Tag}"
+            : azdo.Branch is not null ? $"@{azdo.Branch}"
+            : string.Empty;
+
+        var paths = azdo.EffectivePaths;
+        var pathPart = paths.Count switch
+        {
+            0 => string.Empty,
+            1 => ":" + FormatPathSpec(paths[0]),
+            _ => ":[" + string.Join(", ", paths.Select(FormatPathSpec)) + "]",
+        };
+
+        return $"azdo:{azdo.Slug}{pathPart}{refPart}";
+    }
 }

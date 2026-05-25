@@ -397,6 +397,19 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
                 return GithubExpectedTargetsExist(entry, gh, manifestDir, previousState);
 
+            case AzdoSkillSource azdo when !string.IsNullOrWhiteSpace(azdo.Commit):
+                if (!string.Equals(previousState.ResolvedRef, azdo.Commit, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                if (azdo.EffectivePaths.Count > 1)
+                {
+                    return false;
+                }
+
+                return EveryConfiguredTargetExists(entry, manifestDir, previousState);
+
             case LocalDirectorySkillSource local:
                 currentSourceHash = ComputeLocalSourceHash(local, manifestDir);
                 if (currentSourceHash is null)

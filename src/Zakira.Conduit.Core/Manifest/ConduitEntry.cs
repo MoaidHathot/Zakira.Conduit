@@ -20,8 +20,16 @@ public sealed record ConduitEntry
     /// <summary>
     ///     The remote source this entry mirrors. The concrete type is
     ///     determined by the polymorphic JSON discriminator.
+    ///     <para>
+    ///         For ergonomics the JSON value may also be a bare string
+    ///         (e.g. <c>"https://github.com/owner/repo"</c> or <c>"./skills"</c>),
+    ///         in which case it is deserialised as a
+    ///         <see cref="UriBasedSkillSource"/> and resolved to its concrete
+    ///         kind by the inference coordinator at manifest load time.
+    ///     </para>
     /// </summary>
     [JsonPropertyName("source")]
+    [JsonConverter(typeof(SourceShorthandJsonConverter))]
     public required ISkillSource Source { get; init; }
 
     /// <summary>

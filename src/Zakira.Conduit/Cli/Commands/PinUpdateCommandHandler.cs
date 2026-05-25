@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using Zakira.Conduit.Manifest;
+using Zakira.Conduit.Sources.Azdo;
 using Zakira.Conduit.Sources.GitHub;
 
 namespace Zakira.Conduit.Cli.Commands;
@@ -19,6 +20,7 @@ internal sealed class PinUpdateCommandHandler
     private readonly IManifestLoader _loader;
     private readonly IManifestWriter _writer;
     private readonly IGitHubRefResolver _refResolver;
+    private readonly IAzdoRefResolver _azdoRefResolver;
     private readonly ConsoleStyle _style;
     private readonly ILogger<PinUpdateCommandHandler> _logger;
 
@@ -27,6 +29,7 @@ internal sealed class PinUpdateCommandHandler
         IManifestLoader loader,
         IManifestWriter writer,
         IGitHubRefResolver refResolver,
+        IAzdoRefResolver azdoRefResolver,
         ConsoleStyle style,
         ILogger<PinUpdateCommandHandler> logger)
     {
@@ -34,6 +37,7 @@ internal sealed class PinUpdateCommandHandler
         _loader = loader;
         _writer = writer;
         _refResolver = refResolver;
+        _azdoRefResolver = azdoRefResolver;
         _style = style;
         _logger = logger;
     }
@@ -70,36 +74,72 @@ internal sealed class PinUpdateCommandHandler
                 continue;
             }
 
-            if (entry.Source is not GitHubSkillSource gh)
+            if (entry.Source is GitHubSkillSource gh)
             {
-                skipped.Add((entry.Name, $"not a github source ('{entry.Source.Kind}')"));
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(gh.Branch))
-            {
-                skipped.Add((entry.Name, "no 'branch' field to resolve"));
-                continue;
-            }
-
-            try
-            {
-                var newSha = await _refResolver.ResolveAsync(gh.Owner, gh.RepoName, gh.Branch, cancellationToken).ConfigureAwait(false);
-                var oldCommit = gh.Commit ?? string.Empty;
-
-                if (string.Equals(oldCommit, newSha, StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(gh.Branch))
                 {
-                    skipped.Add((entry.Name, $"already at {Shorten(newSha)}"));
+                    skipped.Add((entry.Name, "no 'branch' field to resolve"));
                     continue;
                 }
 
-                updates.Add((i, entry.Name, oldCommit, newSha, gh.Branch));
+                try
+                {
+                    var newSha = await _refResolver.ResolveAsync(gh.Owner, gh.RepoName, gh.Branch, cancellationToken).ConfigureAwait(false);
+                    var oldCommit = gh.Commit ?? string.Empty;
+
+                    if (string.Equals(oldCommit, newSha, StringComparison.OrdinalIgnoreCase))
+                    {
+                        skipped.Add((entry.Name, $"already at {Shorten(newSha)}"));
+                        continue;
+                    }
+
+                    updates.Add((i, entry.Name, oldCommit, newSha, gh.Branch));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Failed to resolve branch '{Branch}' for entry '{Name}'", gh.Branch, entry.Name);
+                    errors.Add((entry.Name, ex.Message));
+                }
+
+                continue;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+
+            if (entry.Source is AzdoSkillSource azdo)
             {
-                _logger.LogError(ex, "Failed to resolve branch '{Branch}' for entry '{Name}'", gh.Branch, entry.Name);
-                errors.Add((entry.Name, ex.Message));
+                var intentValue = !string.IsNullOrWhiteSpace(azdo.Branch) ? azdo.Branch :
+                                  !string.IsNullOrWhiteSpace(azdo.Tag) ? azdo.Tag : null;
+                var intentKind = !string.IsNullOrWhiteSpace(azdo.Branch) ? "branch" :
+                                 !string.IsNullOrWhiteSpace(azdo.Tag) ? "tag" : null;
+
+                if (intentValue is null || intentKind is null)
+                {
+                    skipped.Add((entry.Name, "no 'branch' or 'tag' field to resolve"));
+                    continue;
+                }
+
+                try
+                {
+                    var newSha = await _azdoRefResolver.ResolveAsync(azdo, intentValue, intentKind, cancellationToken).ConfigureAwait(false);
+                    var oldCommit = azdo.Commit ?? string.Empty;
+
+                    if (string.Equals(oldCommit, newSha, StringComparison.OrdinalIgnoreCase))
+                    {
+                        skipped.Add((entry.Name, $"already at {Shorten(newSha)}"));
+                        continue;
+                    }
+
+                    updates.Add((i, entry.Name, oldCommit, newSha, intentValue));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Failed to resolve {Kind} '{Ref}' for entry '{Name}'", intentKind, intentValue, entry.Name);
+                    errors.Add((entry.Name, ex.Message));
+                }
+
+                continue;
             }
+
+            skipped.Add((entry.Name, $"unsupported source kind '{entry.Source.Kind}'"));
         }
 
         // Build the new manifest with updated commits.

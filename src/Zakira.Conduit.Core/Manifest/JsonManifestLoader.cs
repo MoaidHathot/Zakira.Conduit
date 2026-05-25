@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Zakira.Conduit.Sources.Inference;
 
 namespace Zakira.Conduit.Manifest;
 
@@ -7,6 +8,18 @@ namespace Zakira.Conduit.Manifest;
 /// </summary>
 public sealed class JsonManifestLoader : IManifestLoader
 {
+    private readonly SkillSourceInferenceCoordinator? _inferenceCoordinator;
+
+    public JsonManifestLoader()
+        : this(null)
+    {
+    }
+
+    public JsonManifestLoader(SkillSourceInferenceCoordinator? inferenceCoordinator)
+    {
+        _inferenceCoordinator = inferenceCoordinator;
+    }
+
     /// <inheritdoc />
     public async Task<ConduitManifest> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
@@ -36,6 +49,20 @@ public sealed class JsonManifestLoader : IManifestLoader
         if (manifest is null)
         {
             throw new ManifestException($"Manifest file '{path}' deserialized to null.", path);
+        }
+
+        // Resolve any 'uri'-shaped sources into their concrete kinds before
+        // validation runs. The validator never sees a UriBasedSkillSource.
+        if (_inferenceCoordinator is not null)
+        {
+            try
+            {
+                manifest = _inferenceCoordinator.Rewrite(manifest);
+            }
+            catch (SkillSourceInferenceException ex)
+            {
+                throw new ManifestException($"Manifest file '{path}' has a source that could not be inferred: {ex.Message}", path, innerException: ex);
+            }
         }
 
         var errors = ManifestValidator.Validate(manifest);

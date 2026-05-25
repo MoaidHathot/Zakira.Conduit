@@ -4,21 +4,16 @@
   "entries": [
     {
       "name": "PowerReview",
-      "source": {
-        "type": "github",
-        "repo": "https://github.com/MoaidHathot/PowerReview",
-        "paths": [
-          "skills"
-        ],
-        "branch": "main"
-      },
+      "description": "Public GitHub skill. Source is a bare URL; Conduit infers the kind.",
+      "source": "https://github.com/MoaidHathot/PowerReview",
       "targets": [
         "~/projects/my-app/.agents/skills"
       ]
     },
     {
       "name": "internal-runbooks",
-      "description": "Private runbooks pinned to a specific commit.",
+      "description": "Private GitHub repo pinned to an immutable commit. Uses CONDUIT_GITHUB_TOKEN.",
+      "disabled": true,
       "source": {
         "type": "github",
         "repo": "my-org/agent-runbooks",
@@ -28,78 +23,41 @@
         "$XDG_CONFIG_HOME/agents/skills"
       ]
     },
-
-    // ---------------------------------------------------------------------
-    // 4) A local skill that lives next to this manifest (relative paths
-    //    are anchored at the manifest's own directory). Use this for
-    //    in-house skills you check in alongside your code, or for any
-    //    folder you'd otherwise `cp -R` by hand.
-    // ---------------------------------------------------------------------
+    {
+      "name": "azdo-skills",
+      "description": "Azure DevOps repo with several sub-paths and the default [env, az] auth chain.",
+      "disabled": true,
+      "source": {
+        "type": "azdo",
+        "url": "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
+        "branch": "main",
+        "paths": ["skills/code-review", "skills/test-writer"]
+      },
+      "targets": [
+        "~/.config/claude/skills"
+      ]
+    },
     {
       "name": "local-skill-sample",
-      "description": "House-style skill kept in this repo. Edit the files in ./local-skill-sample and re-run `conduit sync`.",
-      "source": {
-        "type": "local",
-        "path": "./local-skill-sample"
-      },
+      "description": "House-style skill kept next to this manifest. Source is a bare relative path.",
+      "source": "./local-skill-sample",
       "targets": [
         "~/.config/claude/skills",
         "~/projects/my-app/.agents/skills"
       ]
     },
-
-    // ---------------------------------------------------------------------
-    // 5) Multiple local directories in one entry. Each directory mirrors
-    //    into every target as its own basename sub-folder.
-    // ---------------------------------------------------------------------
     {
-      "name": "local-skill-bundle",
-      "description": "Mirror several local directories at once.",
-      "source": {
-        "type": "local",
-        "paths": [
-          "./local-skill-sample"
-          // Add more directories here as your house-skill collection grows.
-        ]
-      },
-      "targets": [
-        "~/projects/my-app/.agents/skills"
-      ]
-    },
-
-    // ---------------------------------------------------------------------
-    // 6) An entry parked but kept in the manifest for documentation.
-    //    `conduit sync` skips this one until you flip `disabled` back.
-    // ---------------------------------------------------------------------
-    {
-      "name": "experimental-thing",
-      "description": "Not ready for prime time yet \u2014 set 'disabled' to false to enable.",
+      "name": "agent-bundle",
+      "description": "Array source: each element becomes its own independent sub-entry sharing these targets.",
       "disabled": true,
-      "source": {
-        "type": "github",
-        "repo": "octocat/experimental-skills"
-      },
-      "targets": [
-        "~/.config/claude/skills"
-      ]
-    },
-
-    // ---------------------------------------------------------------------
-    // 7) Mirror this repo's own bundled `zakira-conduit` skill into your
-    //    agent's skill folder. The skill teaches the agent how to use
-    //    `conduit` itself \u2014 the dog-food entry.
-    // ---------------------------------------------------------------------
-    {
-      "name": "zakira-conduit",
-      "description": "Mirror the bundled `zakira-conduit` agent skill from this very repo.",
-      "source": {
-        "type": "local",
-        "path": "../skills/zakira-conduit"
-      },
+      "source": [
+        "https://github.com/anthropics/skills/code-review",
+        "https://github.com/anthropics/skills/test-writer",
+        "./local-skill-sample"
+      ],
       "targets": [
         "~/.config/claude/skills"
       ]
     }
-
   ]
 }

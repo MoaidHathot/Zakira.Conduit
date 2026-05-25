@@ -56,9 +56,32 @@
     },
     "source": {
       "oneOf": [
+        { "$ref": "#/$defs/sourceShorthand" },
+        { "$ref": "#/$defs/sourceArray" },
         { "$ref": "#/$defs/githubSource" },
-        { "$ref": "#/$defs/localSource" }
+        { "$ref": "#/$defs/localSource" },
+        { "$ref": "#/$defs/azdoSource" },
+        { "$ref": "#/$defs/uriSource" }
       ]
+    },
+    "sourceShorthand": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Bare-URI shorthand. Equivalent to { \"type\": \"uri\", \"uri\": \"<value>\" }. The same strict prefix rules (./, ../, /, ~, $, %, drive letters, full URLs) apply. Bare slugs (owner/repo) are rejected; use the explicit object form for those."
+    },
+    "sourceArray": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Array of sources. Each element is either a bare-string URI or a full source object. The entry is expanded at load time into one independent sub-entry per element (same name prefix, own state, own targets). Per-target 'as' aliases are not allowed on entries declared this way.",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/sourceShorthand" },
+          { "$ref": "#/$defs/githubSource" },
+          { "$ref": "#/$defs/localSource" },
+          { "$ref": "#/$defs/azdoSource" },
+          { "$ref": "#/$defs/uriSource" }
+        ]
+      }
     },
     "githubSource": {
       "type": "object",
@@ -118,6 +141,102 @@
       ],
       "not": {
         "required": ["path", "paths"]
+      }
+    },
+    "azdoSource": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "azdo" },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Browser-paste / git remote URL. Mutually exclusive with the explicit ('organization','project','repo') triplet."
+        },
+        "organization": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Azure DevOps organization (cloud) or collection (Server) name."
+        },
+        "project": { "type": "string", "minLength": 1 },
+        "repo":    { "type": "string", "minLength": 1 },
+        "baseUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL override for self-hosted AzDO Server. Defaults to https://dev.azure.com/ when using the triplet form."
+        },
+        "branch": { "type": "string" },
+        "tag":    { "type": "string" },
+        "commit": { "type": "string" },
+        "path": {
+          "type": "string",
+          "description": "Optional single sub-path inside the repository. Mutually exclusive with 'paths'."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/pathOrAliased" }
+        },
+        "auth": {
+          "oneOf": [
+            { "type": "string", "enum": ["env", "az", "pat", "anonymous"] },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "enum": ["env", "az", "pat", "anonymous"] }
+            }
+          ],
+          "description": "Auth chain. Default when omitted: [env, az]."
+        },
+        "patEnv": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Env var name to read a PAT from when using the 'pat' auth mode. Defaults to CONDUIT_AZDO_TOKEN."
+        }
+      },
+      "oneOf": [
+        { "required": ["url"] },
+        { "required": ["organization", "project", "repo"] }
+      ],
+      "not": {
+        "required": ["branch", "tag"]
+      }
+    },
+    "uriSource": {
+      "type": "object",
+      "required": ["type", "uri"],
+      "additionalProperties": false,
+      "description": "Source whose concrete kind (github, azdo, local, ...) is inferred from the 'uri' value at load time. Useful when copy-pasting browse URLs without remembering which 'type' to set.",
+      "properties": {
+        "type": { "const": "uri" },
+        "uri": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The source URI. Either a full URL (https://github.com/..., https://dev.azure.com/.../_git/..., git@host:..., etc.) or a local-path-shaped value (./foo, ../foo, /abs, ~/foo, $VAR/foo, %VAR%/foo, C:\\foo). Bare slugs (owner/repo) are intentionally NOT supported by inference; use 'type: github' for those."
+        },
+        "path":    { "type": "string", "description": "Optional sub-path inside the source. Applies to remote sources only." },
+        "paths":   {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/pathOrAliased" }
+        },
+        "branch":  { "type": "string" },
+        "tag":     { "type": "string" },
+        "commit":  { "type": "string" },
+        "baseUrl": { "type": "string", "format": "uri", "description": "Forwarded to source kinds that support it (currently: azdo)." },
+        "auth": {
+          "oneOf": [
+            { "type": "string", "enum": ["env", "az", "pat", "anonymous"] },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "enum": ["env", "az", "pat", "anonymous"] }
+            }
+          ],
+          "description": "Forwarded to source kinds that support it (currently: azdo)."
+        },
+        "patEnv": { "type": "string", "minLength": 1 }
       }
     }
   }

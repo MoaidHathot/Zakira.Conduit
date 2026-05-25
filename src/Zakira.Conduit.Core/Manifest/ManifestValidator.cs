@@ -80,6 +80,7 @@ public static class ManifestValidator
             {
                 GitHubSkillSource gh => gh.EffectivePaths.Count > 1,
                 LocalDirectorySkillSource local => local.EffectivePaths.Count > 1,
+                AzdoSkillSource azdo => azdo.EffectivePaths.Count > 1,
                 _ => false,
             };
 
@@ -101,6 +102,14 @@ public static class ManifestValidator
 
             case LocalDirectorySkillSource local:
                 ValidateLocalSource(local, prefix, errors);
+                break;
+
+            case AzdoSkillSource azdo:
+                ValidateAzdoSource(azdo, prefix, errors);
+                break;
+
+            case UriBasedSkillSource:
+                errors.Add($"{prefix}.source: 'uri'-shaped source reached the validator without being resolved. This is a wiring bug; ensure the manifest loader's inference coordinator is registered.");
                 break;
 
             default:
@@ -142,6 +151,61 @@ public static class ManifestValidator
         }
 
         ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: false, errors);
+    }
+
+    private static void ValidateAzdoSource(AzdoSkillSource source, string prefix, List<string> errors)
+    {
+        var hasUrl = !string.IsNullOrWhiteSpace(source.Url);
+        var hasTriplet = !string.IsNullOrWhiteSpace(source.Organization)
+                         && !string.IsNullOrWhiteSpace(source.Project)
+                         && !string.IsNullOrWhiteSpace(source.Repo);
+
+        if (hasUrl && (hasTriplet || !string.IsNullOrWhiteSpace(source.Organization) || !string.IsNullOrWhiteSpace(source.Project) || !string.IsNullOrWhiteSpace(source.Repo)))
+        {
+            errors.Add($"{prefix}.source: 'url' and the explicit ('organization', 'project', 'repo') triplet are mutually exclusive.");
+        }
+        else if (hasUrl)
+        {
+            if (!AzdoUrlParser.TryParse(source.Url, out _, out var parseError))
+            {
+                errors.Add($"{prefix}.source.url: {parseError}");
+            }
+        }
+        else if (!hasTriplet)
+        {
+            errors.Add($"{prefix}.source: provide either 'url' or all of 'organization', 'project', 'repo'.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(source.BaseUrl) && !Uri.TryCreate(source.BaseUrl, UriKind.Absolute, out _))
+        {
+            errors.Add($"{prefix}.source.baseUrl: '{source.BaseUrl}' is not a valid absolute URL.");
+        }
+
+        var refsSet = new[] { source.Branch, source.Tag, source.Commit }.Count(v => !string.IsNullOrWhiteSpace(v));
+        // branch + commit may coexist (branch = intent, commit = snapshot). Same for tag + commit.
+        if (refsSet > 1 && !string.IsNullOrWhiteSpace(source.Branch) && !string.IsNullOrWhiteSpace(source.Tag))
+        {
+            errors.Add($"{prefix}.source: 'branch' and 'tag' are mutually exclusive.");
+        }
+
+        if (source.Path is not null && source.Paths is { Count: > 0 })
+        {
+            errors.Add($"{prefix}.source: 'path' and 'paths' are mutually exclusive.");
+        }
+
+        if (source.Auth is { Count: > 0 })
+        {
+            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "env", "az", "pat", "anonymous" };
+            foreach (var mode in source.Auth)
+            {
+                if (!allowed.Contains(mode))
+                {
+                    errors.Add($"{prefix}.source.auth: unknown mode '{mode}'. Allowed: env, az, pat, anonymous.");
+                }
+            }
+        }
+
+        ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: true, errors);
     }
 
     /// <summary>

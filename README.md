@@ -17,7 +17,9 @@
 ## Highlights
 
 - **One manifest, many targets, many sub-paths.** Each entry has a single source (which may produce one or many content units) and a list of destinations.
-- **Multiple source kinds, same model.** Ships with **GitHub** (zipball snapshot) and **local directory** sources today; new kinds (GitLab, plain HTTP archive, ...) are a single record + fetcher away.
+- **Multiple source kinds, same model.** Ships with **GitHub** (zipball snapshot), **Azure DevOps** (REST Items API, with PAT and `az` CLI auth) and **local directory** sources today; new kinds (GitLab, plain HTTP archive, ...) are a single record + fetcher away.
+- **`type: uri` shorthand.** Skip the discriminator entirely &mdash; paste a URL and Conduit picks the right source kind: `{ "source": "https://github.com/..." }` (bare-string) or `{ "source": { "type": "uri", "uri": "..." } }` (object form, when you need overrides). See [URI inference](#uri-inference-typeuri) below.
+- **Array `source`.** One entry can declare several remotes at once: `{ "source": ["https://github.com/foo/bar/skills", "./vendor/skill"] }`. Each element becomes its own independent sub-entry sharing the same targets. See [Array sources](#array-sources) below.
 - **Browser-paste friendly.** GitHub sources accept slug (`owner/repo`), browser URL (`https://github.com/owner/repo`), or SSH form (`git@github.com:owner/repo.git`) in the same field.
 - **Multi-path fetches.** A single entry can pull N sub-paths out of one source in one go (one zipball, one extraction, N destinations).
 - **Per-path and per-target renames.** Both `paths` and `targets` accept either a bare string or `{ "path": ..., "as": ... }` to override the destination directory name.
@@ -184,6 +186,80 @@ Snapshot of a GitHub repository, fetched as a zipball over HTTPS.
 
 If neither `branch` nor `commit` is given, the repository's default branch is used. If neither `path` nor `paths` is given, the **whole repository** is mirrored.
 
+#### `azdo`
+
+Snapshot of an Azure DevOps (cloud or Server) repository, fetched as a zip via
+the Git Items REST API. No `git` clone, no external CLI required for the
+actual download &mdash; auth is purely an HTTP header.
+
+The repository can be addressed in either of two equivalent ways:
+
+```jsonc
+// Browser-paste / git remote form:
+"source": {
+  "type": "azdo",
+  "url": "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
+  "branch": "main",
+  "path": "skills/code-review"
+}
+
+// Explicit triplet (required for self-hosted AzDO Server with a non-default base URL):
+"source": {
+  "type": "azdo",
+  "organization": "contoso",
+  "project": "Conduit",
+  "repo": "agent-skills",
+  "baseUrl": "https://devops.contoso.internal/",   // optional; defaults to https://dev.azure.com/
+  "branch": "main",
+  "paths": ["skills/code-review", "skills/test-writer"]
+}
+```
+
+| Field          | Required | Notes |
+|----------------|----------|-------|
+| `url`          | one of `url` / triplet | Browser URL, git remote (HTTPS or SSH form). Mutually exclusive with the explicit triplet. |
+| `organization` | one of `url` / triplet | Org (cloud) or collection (Server) name. Required as part of the triplet. |
+| `project`      | one of `url` / triplet | Project name. |
+| `repo`         | one of `url` / triplet | Repository name or GUID. |
+| `baseUrl`      | no | Override the REST base URL for AzDO Server. Defaults to `https://dev.azure.com/` for the triplet form; derived from the URL for the `url` form. |
+| `branch`       | no | Branch name. May coexist with `commit` (branch = intent, commit = snapshot). |
+| `tag`          | no | Tag name. Mutually exclusive with `branch`. |
+| `commit`       | no | Commit SHA pin. Wins over `branch` / `tag` for fetching. |
+| `path`         | no | Single repo-relative sub-path. Mutually exclusive with `paths`. |
+| `paths`        | no | List of repo-relative sub-paths. Same shape as the GitHub source. |
+| `auth`         | no | Auth chain (string or array). See below. Default: `["env", "az"]`. |
+| `patEnv`       | no | For the `pat` mode: the env var name to read a PAT from. Defaults to `CONDUIT_AZDO_TOKEN`. |
+
+Each entry in `paths` triggers one HTTP request to the Items endpoint with the
+corresponding `scopePath`, so transfers stay small even when a single entry
+mirrors several sub-trees out of a large monorepo. If neither `path` nor
+`paths` is given the **whole repository** is mirrored.
+
+`conduit pin` and `conduit update` resolve a tracked `branch` or `tag` into a
+commit SHA and rewrite the manifest's `commit` field, exactly like the GitHub
+flow.
+
+##### Authentication (`auth`)
+
+`auth` accepts a single mode name or an ordered array of mode names. The
+first provider that yields a credential wins. The default chain when `auth`
+is unset is `["env", "az"]`.
+
+| Mode        | Source of credential                                                                          | HTTP header |
+|-------------|------------------------------------------------------------------------------------------------|-------------|
+| `env`       | `CONDUIT_AZDO_TOKEN` -> `AZURE_DEVOPS_EXT_PAT` -> `SYSTEM_ACCESSTOKEN` (so it just works in AzDO Pipelines). | `Authorization: Basic base64(":"+PAT)` |
+| `az`        | Calls `az account get-access-token --resource <azdo-aad-guid> -o tsv`. Tokens are cached in-memory for ~50 minutes; never persisted. | `Authorization: Bearer <token>` |
+| `pat`       | Reads from the env var named by `patEnv` (defaults to `CONDUIT_AZDO_TOKEN`).                  | `Authorization: Basic` |
+| `anonymous` | Skips authentication entirely; useful for public repos.                                        | none |
+
+The `az` CLI is only required when `az` appears in the active chain. When it
+isn't (or when it isn't installed and is reached as a fallback), conduit moves
+on to the next link without surfacing an error.
+
+If the source is a private repo and every provider in the chain declines, the
+request is sent with no `Authorization` header and AzDO responds with HTTP
+401, which is surfaced as a clear failure for that entry.
+
 #### `local`
 
 One or more directories on the local filesystem. Useful for in-repo skills, in-house skills you check in next to other code, or anything you'd otherwise `cp -R` manually.
@@ -194,6 +270,94 @@ One or more directories on the local filesystem. Useful for in-repo skills, in-h
 | `paths` | one of `path`/`paths` | Multiple source directories. Each entry may be a bare string or `{ "path": ..., "as": ... }`. Mutually exclusive with `path`. When two or more are listed, each mirrors to `<target>/<basename-or-alias>/` and the entry's `name` becomes metadata only. |
 
 Paths support `~` and environment-variable expansion (`$VAR`, `${VAR}`, and `%VAR%` on Windows). No copy is made on the way in: directories are read directly and mirrored into each target. `conduit` refuses to run when a source path overlaps with one of its targets, so you can't accidentally recurse into your own output.
+
+### URI inference (`type: uri`)
+
+`type: uri` lets you skip the per-kind discriminator and let Conduit pick
+the right source kind from the URI shape. This is purely an ergonomic shortcut
+&mdash; at load time the entry is rewritten into the equivalent concrete source
+(`github`, `azdo`, `local`) and the rest of the pipeline (validation, sync,
+state cache, `pin`, `update`) never sees the `uri` form.
+
+Two equivalent shapes:
+
+```jsonc
+// Bare-string shorthand. Use this when no overrides are needed.
+"source": "https://github.com/anthropics/skills"
+
+// Object form. Use this when you need to set path / branch / commit / etc.
+"source": { "type": "uri", "uri": "https://github.com/anthropics/skills", "path": "code-review", "branch": "main" }
+
+// And both are equivalent to the fully-explicit form:
+"source": { "type": "github", "repo": "https://github.com/anthropics/skills", "path": "code-review", "branch": "main" }
+```
+
+Detection rules:
+
+| URI shape                                                            | Inferred kind |
+|----------------------------------------------------------------------|---------------|
+| `https://github.com/...`, `git@github.com:...`, `github.com/...`     | `github`      |
+| `https://dev.azure.com/.../_git/...`, `*.visualstudio.com/.../_git/...`, `git@ssh.dev.azure.com:v3/...`, any URL containing `/_git/` (AzDO Server) | `azdo`        |
+| `./foo`, `../foo`, `/abs`, `~/foo`, `$VAR/...`, `%VAR%\...`, `C:\...` (drive letters)| `local`       |
+
+Optional fields on the `uri` source (`path`, `paths`, `branch`, `tag`,
+`commit`, `baseUrl`, `auth`, `patEnv`) are forwarded only to source kinds
+that accept them. Setting `branch` on an inferred local source, for example,
+is a load-time error with a clear message.
+
+**What the inferrer intentionally does *not* handle:**
+
+- **Bare slugs** (`anthropics/skills`). They're ambiguous in a URI-driven manifest. Use `"type": "github"` + `"repo": "anthropics/skills"` when you want the slug ergonomics.
+- **Refs embedded in the URL** (`/tree/<branch>`, `/commit/<sha>`, AzDO's `?version=GB<branch>`). Use the dedicated `branch` / `tag` / `commit` fields &mdash; they're consistent across every source kind.
+- **Self-hosted GitLab / Gitea / etc.** until they have their own inferrer.
+
+When in doubt, keep using the explicit `"type": ...` form. It is and will remain the canonical way to declare a source.
+
+#### URL sub-paths and refs in inferred sources
+
+When a URI is itself a browse URL with extra path segments, the inferrer harvests
+them into the equivalent `path` (and, for GitHub `tree`/`blob`/`raw` URLs, `branch`)
+fields automatically:
+
+| Pasted URI                                                                | Inferred source                                                 |
+|---------------------------------------------------------------------------|-----------------------------------------------------------------|
+| `https://github.com/anthropics/skills/code-review`                        | `github` repo `anthropics/skills`, path `code-review`           |
+| `https://github.com/anthropics/skills/tree/main/code-review/sub`          | `github` repo, branch `main`, path `code-review/sub`            |
+| `https://dev.azure.com/contoso/Conduit/_git/agent-skills/skills/x`        | `azdo` repo, path `skills/x`                                    |
+| `https://dev.azure.com/contoso/Conduit/_git/agent-skills?version=GBmain&path=/skills` | `azdo` repo, branch `main`, path `skills` (from `?path=`) |
+
+Setting an explicit `path`/`paths`/`branch` on the same source while the URL
+*also* carries one is rejected as a contradiction.
+
+### Array sources
+
+A single entry can declare several remotes at once by giving its `source` an
+array value. Each element &mdash; bare-URI string or explicit source object
+&mdash; is expanded at load time into its own independent sub-entry that
+shares the parent's `targets`, `description`, and `disabled` flag:
+
+```jsonc
+{
+  "name": "agent-bundle",
+  "source": [
+    "https://github.com/anthropics/skills/code-review",
+    "https://github.com/acme/skills/test-writer",
+    "./local-skill-sample"
+  ],
+  "targets": ["~/.config/claude/skills"]
+}
+```
+
+is equivalent to three independent entries named `agent-bundle-code-review`,
+`agent-bundle-test-writer`, `agent-bundle-local-skill-sample`, each with the
+same targets. They appear as separate rows in `conduit list`, each gets its
+own state record (so cache hits, `pin`/`update`, and failures are per-element),
+and each can carry a different source kind without forcing the user to repeat
+boilerplate.
+
+Per-target `as` aliases are rejected on array-source entries (they would not
+apply cleanly to N destinations &mdash; same constraint that already applies
+to multi-`paths` entries).
 
 ### Destination naming
 
@@ -231,7 +395,7 @@ This keeps the simple case ergonomic ("name the entry after the skill, target ge
 | `entries[].name`            | yes      | `[A-Za-z0-9._-]+`. Used as the destination subdirectory when the source produces exactly one content unit; metadata only otherwise. Must be unique within the manifest. |
 | `entries[].description`     | no       | Free-form documentation; ignored at runtime. |
 | `entries[].disabled`        | no       | `true` skips the entry during `sync`. |
-| `entries[].source.type`     | yes      | `"github"` or `"local"`. The discriminator for future source kinds. |
+| `entries[].source.type`     | yes      | `"github"`, `"azdo"`, `"local"`, or `"uri"` (auto-detect). The discriminator for future source kinds. |
 | `entries[].source.*`        | varies   | See the per-kind tables above. |
 | `entries[].targets[]`       | yes      | List of directory paths. `~`, `$VAR`, `${VAR}` and (on Windows) `%VAR%` are expanded. Relative paths are rooted against the manifest's directory. |
 

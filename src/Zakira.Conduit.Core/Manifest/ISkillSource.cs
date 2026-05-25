@@ -15,6 +15,8 @@ namespace Zakira.Conduit.Manifest;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
 [JsonDerivedType(typeof(GitHubSkillSource), GitHubSkillSource.TypeDiscriminator)]
 [JsonDerivedType(typeof(LocalDirectorySkillSource), LocalDirectorySkillSource.TypeDiscriminator)]
+[JsonDerivedType(typeof(AzdoSkillSource), AzdoSkillSource.TypeDiscriminator)]
+[JsonDerivedType(typeof(UriBasedSkillSource), UriBasedSkillSource.TypeDiscriminator)]
 public interface ISkillSource
 {
     /// <summary>
