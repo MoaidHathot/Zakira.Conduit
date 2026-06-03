@@ -67,7 +67,7 @@ internal sealed class ListCommandHandler
                 _ => entry.Source.Kind,
             };
 
-            Console.WriteLine($"- {_style.Bold(entry.Name)}{status}");
+            Console.WriteLine($"- {_style.Bold(entry.ResolvedName)}{status}");
             Console.WriteLine($"    source : {sourceSummary}");
             Console.WriteLine($"    targets:");
             foreach (var target in entry.Targets)

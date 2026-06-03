@@ -5,7 +5,9 @@ namespace Zakira.Conduit.Sources.Inference;
 /// <summary>
 ///     Walks every registered <see cref="ISkillSourceInferrer"/> until one
 ///     recognises the URI, then returns the concrete <see cref="ISkillSource"/>.
-///     Also rewrites a whole <see cref="ConduitManifest"/> in one pass.
+///     Also rewrites a whole <see cref="ConduitManifest"/> in one pass so that
+///     downstream code (validator, synchronizer, fetchers) only ever sees
+///     concrete sources and entries with a populated <see cref="ConduitEntry.Name"/>.
 /// </summary>
 public sealed class SkillSourceInferenceCoordinator
 {
@@ -44,10 +46,13 @@ public sealed class SkillSourceInferenceCoordinator
     /// <summary>
     ///     Returns a new <see cref="ConduitManifest"/> in which:
     ///     <list type="bullet">
-    ///         <item><description>every <see cref="UriBasedSkillSource"/> entry has been replaced with its inferred concrete source, and</description></item>
-    ///         <item><description>every entry whose source is an <see cref="ArraySkillSource"/> has been expanded into N independent entries (one per array element).</description></item>
+    ///         <item><description>every <see cref="UriBasedSkillSource"/> entry has been replaced with its inferred concrete source,</description></item>
+    ///         <item><description>every <see cref="AliasedSkillSource"/> wrapper has been unwrapped and its alias applied to the owning entry's name,</description></item>
+    ///         <item><description>every entry whose source is an <see cref="ArraySkillSource"/> has been expanded into N independent entries (one per array element), and</description></item>
+    ///         <item><description>every resulting entry has <see cref="ConduitEntry.Name"/> populated (from the user-supplied <c>name</c>, an explicit alias, or a source-derived default).</description></item>
     ///     </list>
-    ///     Entries whose source is already a concrete kind pass through unchanged.
+    ///     Entries whose source is already a concrete kind (and whose name is
+    ///     already supplied) pass through unchanged.
     /// </summary>
     public ConduitManifest Rewrite(ConduitManifest manifest)
     {
@@ -58,21 +63,43 @@ public sealed class SkillSourceInferenceCoordinator
         {
             var entry = manifest.Entries[i];
 
-            // Step 1: if this entry's source is an array, expand it now. Each
-            // expanded entry is then processed individually for scalar inference.
-            if (entry.Source is ArraySkillSource arr)
+            // Step 1: strip any outermost AliasedSkillSource wrapper, recording
+            // the alias so we can use it as a default for entry.Name later.
+            var (unwrappedSource, topAlias) = UnwrapAlias(entry.Source, $"entries[{i}] ('{entry.Name ?? "<unnamed>"}').source");
+
+            // Step 2: if the unwrapped source is an array, expand it now.
+            // The parent name (used to prefix element names) is the user's
+            // explicit entry.Name when set, otherwise the wrapper alias if any,
+            // otherwise null (elements stand on their own).
+            if (unwrappedSource is ArraySkillSource arr)
             {
-                AppendExpandedEntries(newEntries, entry, arr, i);
+                var parentName = SanitizeOrNull(entry.Name) ?? SanitizeOrNull(topAlias);
+                AppendExpandedEntries(newEntries, entry, arr, i, parentName);
                 continue;
             }
 
-            newEntries.Add(ResolveScalar(entry, i));
+            // Step 3: scalar. Infer concrete kind if needed, then fill name.
+            var concrete = ResolveScalarSource(unwrappedSource, i, entry.Name);
+            var resolvedName = SanitizeOrNull(entry.Name)
+                               ?? SanitizeOrNull(topAlias)
+                               ?? SanitizeOrNull(DefaultSourceNameDeriver.Derive(concrete));
+
+            newEntries.Add(entry with
+            {
+                Source = concrete,
+                Name = resolvedName,
+            });
         }
 
         return manifest with { Entries = newEntries };
     }
 
-    private void AppendExpandedEntries(List<ConduitEntry> sink, ConduitEntry entry, ArraySkillSource array, int index)
+    private void AppendExpandedEntries(
+        List<ConduitEntry> sink,
+        ConduitEntry entry,
+        ArraySkillSource array,
+        int index,
+        string? parentName)
     {
         // Reject per-target 'as' aliases on multi-element entries: aliases
         // wouldn't apply cleanly to N destinations (same constraint the
@@ -80,32 +107,44 @@ public sealed class SkillSourceInferenceCoordinator
         if (entry.Targets.Any(t => !string.IsNullOrWhiteSpace(t.As)))
         {
             throw new SkillSourceInferenceException(
-                $"entries[{index}] ('{entry.Name}'): per-target 'as' aliases are not allowed on entries whose source is an array.");
+                $"entries[{index}] ('{entry.Name ?? "<unnamed>"}'): per-target 'as' aliases are not allowed on entries whose source is an array.");
         }
 
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var j = 0; j < array.Elements.Count; j++)
         {
-            // Resolve each element to its concrete kind, then derive a unique
-            // entry name for it. The base name follows the pattern
-            // '<parent>/<element-basename>' so logs and state stay grouped.
+            // Unwrap a per-element alias (in-string arrow or wrapper-object form)
+            // before resolving the scalar source.
+            var (innerElement, elementAlias) = UnwrapAlias(
+                array.Elements[j],
+                $"entries[{index}] ('{entry.Name ?? "<unnamed>"}').source[{j}]");
+
             ISkillSource concreteElement;
             try
             {
-                concreteElement = ResolveScalarSource(array.Elements[j]);
+                concreteElement = ResolveScalarSource(innerElement, index, entry.Name, elementIndex: j);
             }
             catch (SkillSourceInferenceException ex)
             {
                 throw new SkillSourceInferenceException(
-                    $"entries[{index}] ('{entry.Name}').source[{j}]: {ex.Message}", ex);
+                    $"entries[{index}] ('{entry.Name ?? "<unnamed>"}').source[{j}]: {ex.Message}", ex);
             }
 
-            var baseName = DeriveElementName(concreteElement, fallback: $"element-{j}");
-            var elementName = SanitizeName($"{entry.Name}-{baseName}");
+            // Pick the per-element identity: alias wins over source-derived,
+            // which wins over a positional fallback.
+            var baseName = SanitizeOrNull(elementAlias)
+                           ?? SanitizeOrNull(DefaultSourceNameDeriver.Derive(concreteElement))
+                           ?? $"element-{j}";
+
+            // Combine with the parent name (when set) so logs and state stay
+            // grouped; without a parent the element name stands on its own.
+            var elementName = parentName is null
+                ? SanitizeName(baseName)
+                : SanitizeName($"{parentName}-{baseName}");
+
             if (!usedNames.Add(elementName))
             {
-                // Disambiguate collisions with the element index.
-                elementName = SanitizeName($"{entry.Name}-{baseName}-{j}");
+                elementName = SanitizeName($"{elementName}-{j}");
                 usedNames.Add(elementName);
             }
 
@@ -120,92 +159,105 @@ public sealed class SkillSourceInferenceCoordinator
         }
     }
 
-    private ConduitEntry ResolveScalar(ConduitEntry entry, int index)
+    /// <summary>
+    ///     Strips an outermost <see cref="AliasedSkillSource"/> wrapper (if
+    ///     present), returning the inner source plus the alias the wrapper
+    ///     carried. Non-wrapper sources pass through unchanged with no alias.
+    /// </summary>
+    private static (ISkillSource Inner, string? Alias) UnwrapAlias(ISkillSource source, string locationForErrors)
     {
-        if (entry.Source is not UriBasedSkillSource uri)
+        if (source is null)
         {
-            return entry;
+            throw new SkillSourceInferenceException($"{locationForErrors}: source must not be null.");
         }
 
+        if (source is AliasedSkillSource aliased)
+        {
+            // The converter already rejects wrappers-around-wrappers and
+            // wrappers-around-arrays, but defend against direct construction.
+            if (aliased.Inner is AliasedSkillSource)
+            {
+                throw new SkillSourceInferenceException(
+                    $"{locationForErrors}: aliased wrappers must not be nested.");
+            }
+
+            return (aliased.Inner, aliased.As);
+        }
+
+        return (source, null);
+    }
+
+    private ISkillSource ResolveScalarSource(ISkillSource source, int entryIndex, string? entryName, int? elementIndex = null)
+    {
+        return source switch
+        {
+            UriBasedSkillSource uri => InferWithContext(uri, entryIndex, entryName, elementIndex),
+            ArraySkillSource => throw new SkillSourceInferenceException("nested 'source' arrays are not supported."),
+            AliasedSkillSource => throw new SkillSourceInferenceException("aliased wrappers must be unwrapped before resolving."),
+            _ => source,
+        };
+    }
+
+    private ISkillSource InferWithContext(UriBasedSkillSource uri, int entryIndex, string? entryName, int? elementIndex)
+    {
         try
         {
-            var concrete = Infer(uri);
-            return entry with { Source = concrete };
+            return Infer(uri);
         }
         catch (SkillSourceInferenceException ex)
         {
-            throw new SkillSourceInferenceException(
-                $"entries[{index}] ('{entry.Name}'): {ex.Message}", ex);
+            var location = elementIndex is null
+                ? $"entries[{entryIndex}] ('{entryName ?? "<unnamed>"}')"
+                : $"entries[{entryIndex}] ('{entryName ?? "<unnamed>"}').source[{elementIndex}]";
+            throw new SkillSourceInferenceException($"{location}: {ex.Message}", ex);
         }
     }
 
-    private ISkillSource ResolveScalarSource(ISkillSource source) => source switch
-    {
-        UriBasedSkillSource uri => Infer(uri),
-        ArraySkillSource => throw new SkillSourceInferenceException("nested 'source' arrays are not supported."),
-        _ => source,
-    };
-
-    /// <summary>
-    ///     Picks a short, stable name suffix for an expanded element. Falls
-    ///     back to <paramref name="fallback"/> when the source kind doesn't
-    ///     expose anything obviously human-friendly.
-    /// </summary>
-    private static string DeriveElementName(ISkillSource source, string fallback) => source switch
-    {
-        GitHubSkillSource gh => DeriveFromPathOrName(gh.Path, gh.Paths, gh.RepoName),
-        AzdoSkillSource azdo => DeriveFromPathOrName(azdo.Path, azdo.Paths, azdo.ResolvedComponents.Repo),
-        LocalDirectorySkillSource local => DeriveLocalName(local) ?? fallback,
-        _ => fallback,
-    };
-
-    private static string DeriveFromPathOrName(string? path, IReadOnlyList<PathSpec>? paths, string fallback)
-    {
-        if (!string.IsNullOrWhiteSpace(path))
-        {
-            return BasenameOf(path);
-        }
-
-        if (paths is { Count: > 0 })
-        {
-            return paths.Count == 1 ? paths[0].ResolvedBasename : fallback;
-        }
-
-        return fallback;
-    }
-
-    private static string? DeriveLocalName(LocalDirectorySkillSource local)
-    {
-        var paths = local.EffectivePaths;
-        if (paths.Count == 1)
-        {
-            return BasenameOf(paths[0].Path);
-        }
-
-        return null;
-    }
-
-    private static string BasenameOf(string path)
-    {
-        var normalized = path.Replace('\\', '/').TrimEnd('/');
-        var slash = normalized.LastIndexOf('/');
-        return slash < 0 ? normalized : normalized[(slash + 1)..];
-    }
+    private static string? SanitizeOrNull(string? raw) =>
+        string.IsNullOrWhiteSpace(raw) ? null : SanitizeName(raw);
 
     private static string SanitizeName(string raw)
     {
-        // Entry names are [A-Za-z0-9._-]. Replace anything else with '-'.
+        // Entry names are [A-Za-z0-9._-]. Replace anything else with '-' and
+        // collapse runs of '-' so a name like "owner/repo name" becomes
+        // "owner-repo-name" rather than "owner-repo--name".
         var chars = raw.ToCharArray();
         for (var i = 0; i < chars.Length; i++)
         {
             var c = chars[i];
-            if (!char.IsLetterOrDigit(c) && c is not ('.' or '_' or '-'))
+            var ok = (c >= 'A' && c <= 'Z')
+                     || (c >= 'a' && c <= 'z')
+                     || (c >= '0' && c <= '9')
+                     || c == '.' || c == '_' || c == '-';
+            if (!ok)
             {
                 chars[i] = '-';
             }
         }
 
-        var result = new string(chars).Trim('-');
-        return result.Length == 0 ? "entry" : result;
+        // Collapse runs of '-' and trim.
+        var sb = new System.Text.StringBuilder(chars.Length);
+        var prevDash = false;
+        foreach (var c in chars)
+        {
+            if (c == '-')
+            {
+                if (prevDash)
+                {
+                    continue;
+                }
+
+                prevDash = true;
+            }
+            else
+            {
+                prevDash = false;
+            }
+
+            sb.Append(c);
+        }
+
+        var result = sb.ToString().Trim('-');
+        return string.IsNullOrEmpty(result) ? "entry" : result;
     }
 }

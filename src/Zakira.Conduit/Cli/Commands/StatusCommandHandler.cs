@@ -54,7 +54,7 @@ internal sealed class StatusCommandHandler
 
         var rows = model.Entries.Select(entry =>
         {
-            var entryState = _stateStore.GetEntry(state, entry.Name);
+            var entryState = _stateStore.GetEntry(state, entry.ResolvedName);
             var (allTargetsPresent, targetCheck) = ProbeTargets(entry, manifestPath, entryState);
             return new StatusRow(
                 entry,
@@ -120,7 +120,7 @@ internal sealed class StatusCommandHandler
                 statusLabel = _style.Green("synced");
             }
 
-            Console.WriteLine($"- {_style.Bold(entry.Name)}{status}  [{statusLabel}]");
+            Console.WriteLine($"- {_style.Bold(entry.ResolvedName)}{status}  [{statusLabel}]");
 
             if (row.EntryState is { } es)
             {
@@ -165,7 +165,7 @@ internal sealed class StatusCommandHandler
             generatedAt = now,
             entries = rows.Select(r => new
             {
-                name = r.Entry.Name,
+                name = r.Entry.ResolvedName,
                 disabled = r.Entry.Disabled,
                 kind = r.Entry.Source.Kind,
                 neverSynced = r.EntryState is null,

@@ -32,7 +32,7 @@ Every field accepted by a `conduit.json` manifest. The runtime validator (`Manif
 
 | Field         | Required | Notes |
 |---------------|----------|-------|
-| `name`        | yes      | Matches `[A-Za-z0-9._-]+`. Unique within the manifest. Becomes the destination subdirectory name when the source produces exactly one content unit (and no per-target `as:` override is set). When the source produces multiple content units, the name is metadata only (used by `--entry` filtering and logs). |
+| `name`        | no       | Matches `[A-Za-z0-9._-]+`. Unique within the manifest. **Optional**: when omitted, Conduit derives a default from the source (GitHub/AzDO repo name, single-path local directory basename) or from an explicit alias supplied via the in-string `... -> Name` shorthand or the `{ "source": ..., "as": "Name" }` wrapper. Becomes the destination subdirectory name when the source produces exactly one content unit (and no per-target `as:` override is set). When the source produces multiple content units, the name is metadata only (used by `--entry` filtering and logs). |
 | `description` | no       | Free-form documentation; ignored at runtime. |
 | `disabled`    | no       | Default `false`. When `true`, `sync` skips the entry. |
 | `source`      | yes      | The remote or local source. See "Source object". |
@@ -104,11 +104,36 @@ Both target paths and local source paths support:
 
 - `entries` is non-empty.
 - Every `name` matches the allowed character set and is unique.
+- Every entry resolves to a non-null `name` (either explicit, alias-supplied, or source-derived).
 - Every `targets[]` is non-empty and contains at least one valid path.
 - For github sources: `repo` must parse to a valid `owner/name`.
 - `path` + `paths` are mutually exclusive on every source.
 - For multi-element `paths`: every resolved destination name (alias or basename) is unique.
 - For multi-unit sources: no target may carry a per-target `as:` alias.
 - A source path may not begin with `/` or contain `..` for github sources.
+- **Cross-entry destination uniqueness**: two entries (or two array-expanded sub-entries) must not write into the same `<target>/<destName>/` directory.
 
 Run `conduit validate` to surface every violation. The exit code is `2` when the manifest fails to load or validate.
+
+## Source aliases (`... -> Name` and `{ source, as }`)
+
+Two equivalent shorthand forms attach a destination alias to a source without
+having to spell out the full entry-level `name` field. Useful when you want
+multiple array elements to land in well-named folders without writing each
+one out:
+
+```jsonc
+// In-string arrow suffix on a bare URI. The alias after ' -> ' must match
+// [A-Za-z0-9._-]+. Reserved exclusively for the bare-string shorthand;
+// concrete `{type, ...}` objects use the wrapper form below.
+"source": "https://github.com/anthropics/skills/code-review -> CodeReview"
+
+// Object wrapper. Recognised by the absence of a `type` discriminator.
+// Works around any inner source shape: a bare URI, a concrete object, etc.
+"source": { "source": { "type": "github", "repo": "anthropics/skills", "path": "code-review" }, "as": "CodeReview" }
+```
+
+Both set the entry name to `CodeReview`. The wrapper is rejected if it
+contains anything other than `source` and `as`, if `source` is another
+wrapper (only one alias per source), or if `source` is an array (aliases
+apply to single sources only).

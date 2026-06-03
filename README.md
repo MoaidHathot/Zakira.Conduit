@@ -19,6 +19,8 @@
 - **One manifest, many targets, many sub-paths.** Each entry has a single source (which may produce one or many content units) and a list of destinations.
 - **Multiple source kinds, same model.** Ships with **GitHub** (zipball snapshot), **Azure DevOps** (REST Items API, with PAT and `az` CLI auth) and **local directory** sources today; new kinds (GitLab, plain HTTP archive, ...) are a single record + fetcher away.
 - **`type: uri` shorthand.** Skip the discriminator entirely &mdash; paste a URL and Conduit picks the right source kind: `{ "source": "https://github.com/..." }` (bare-string) or `{ "source": { "type": "uri", "uri": "..." } }` (object form, when you need overrides). See [URI inference](#uri-inference-typeuri) below.
+- **Optional `name`, source-derived defaults.** Drop `name` from an entry and Conduit derives the destination folder from the source itself (GitHub/AzDO repo name, local dir basename). Override per-entry or per-array-element with `"... -> Name"` shorthand or `{ "source": ..., "as": "Name" }` wrapper.
+- **Cross-entry destination guard.** Two entries that would write into the same `<target>/<destName>/` are caught at validation time with a clear error pointing at both offenders.
 - **Array `source`.** One entry can declare several remotes at once: `{ "source": ["https://github.com/foo/bar/skills", "./vendor/skill"] }`. Each element becomes its own independent sub-entry sharing the same targets. See [Array sources](#array-sources) below.
 - **Browser-paste friendly.** GitHub sources accept slug (`owner/repo`), browser URL (`https://github.com/owner/repo`), or SSH form (`git@github.com:owner/repo.git`) in the same field.
 - **Multi-path fetches.** A single entry can pull N sub-paths out of one source in one go (one zipball, one extraction, N destinations).
@@ -285,6 +287,10 @@ Two equivalent shapes:
 // Bare-string shorthand. Use this when no overrides are needed.
 "source": "https://github.com/anthropics/skills"
 
+// Bare-string shorthand with an in-line destination alias.
+// (Equivalent to the object wrapper { "source": "...", "as": "review" }.)
+"source": "https://github.com/anthropics/skills/code-review -> review"
+
 // Object form. Use this when you need to set path / branch / commit / etc.
 "source": { "type": "uri", "uri": "https://github.com/anthropics/skills", "path": "code-review", "branch": "main" }
 
@@ -332,28 +338,61 @@ Setting an explicit `path`/`paths`/`branch` on the same source while the URL
 ### Array sources
 
 A single entry can declare several remotes at once by giving its `source` an
-array value. Each element &mdash; bare-URI string or explicit source object
-&mdash; is expanded at load time into its own independent sub-entry that
-shares the parent's `targets`, `description`, and `disabled` flag:
+array value. Each element &mdash; bare-URI string (optionally with an
+in-string ` -> Name` alias suffix), wrapper object (`{ source, as }`), or
+explicit source object &mdash; is expanded at load time into its own
+independent sub-entry that shares the parent's `targets`, `description`, and
+`disabled` flag:
+
+```jsonc
+// Common case: drop 'name' entirely; each element's destination folder is
+// the repo (or local-dir) name.
+{
+  "source": [
+    "https://github.com/MoaidHathot/ActionView/tree/main/skills",
+    "https://github.com/MoaidHathot/PowerReview/tree/main/skills",
+    "./local-skill-sample"
+  ],
+  "targets": ["~/.config/claude/skills"]
+}
+// -> ~/.config/claude/skills/ActionView/
+// -> ~/.config/claude/skills/PowerReview/
+// -> ~/.config/claude/skills/local-skill-sample/
+```
+
+Override an individual element's destination name with either shorthand:
+
+```jsonc
+{
+  "source": [
+    "https://github.com/anthropics/skills/code-review -> CodeReview",                  // arrow
+    { "source": "https://github.com/anthropics/skills/test-writer", "as": "Tests" }     // wrapper
+  ],
+  "targets": ["~/.config/claude/skills"]
+}
+```
+
+When the parent entry *does* set `name`, it becomes a grouping prefix on
+every expanded element &mdash; useful when you want one bundle's children to
+show up grouped in `conduit list`:
 
 ```jsonc
 {
   "name": "agent-bundle",
   "source": [
     "https://github.com/anthropics/skills/code-review",
-    "https://github.com/acme/skills/test-writer",
-    "./local-skill-sample"
+    "https://github.com/acme/skills/test-writer"
   ],
   "targets": ["~/.config/claude/skills"]
 }
+// names: agent-bundle-skills (or agent-bundle-CodeReview when aliased),
+//        agent-bundle-test-writer (or agent-bundle-Tests)
 ```
 
-is equivalent to three independent entries named `agent-bundle-code-review`,
-`agent-bundle-test-writer`, `agent-bundle-local-skill-sample`, each with the
-same targets. They appear as separate rows in `conduit list`, each gets its
-own state record (so cache hits, `pin`/`update`, and failures are per-element),
-and each can carry a different source kind without forcing the user to repeat
-boilerplate.
+Each expanded sub-entry appears as a separate row in `conduit list`, each
+gets its own state record (so cache hits, `pin`/`update`, and failures are
+per-element), and each can carry a different source kind without forcing
+the user to repeat boilerplate.
 
 Per-target `as` aliases are rejected on array-source entries (they would not
 apply cleanly to N destinations &mdash; same constraint that already applies
@@ -363,10 +402,44 @@ to multi-`paths` entries).
 
 | Source produces | Destination per target |
 |---|---|
-| 1 content unit (no `paths`, or 1-element `paths`) | `<target>/<target.as ?? entry.name>/` |
+| 1 content unit (no `paths`, or 1-element `paths`) | `<target>/<target.as ?? entry.name ?? alias ?? sourceDefault>/` |
 | N >= 2 content units (`paths` with multiple elements) | `<target>/<path.as ?? basename(path)>/` per unit. The entry's `name` is metadata only. Per-target aliases are rejected for multi-unit entries (they wouldn't apply cleanly to N destinations). |
 
+`sourceDefault` is the source's natural identity: the GitHub repo name, the
+AzDO repo name, or the local directory basename (for single-path local
+sources). It lets you drop `name` entirely on the common single-unit case:
+
+```jsonc
+{ "source": "https://github.com/MoaidHathot/ActionView/tree/main/skills",
+  "targets": ["~/.config/claude/skills"] }
+// -> ~/.config/claude/skills/ActionView/
+//    (repo name 'ActionView', not the sub-path basename 'skills')
+```
+
 This keeps the simple case ergonomic ("name the entry after the skill, target gets one folder by that name") while letting one entry mirror N skills out of one source with a single fetch.
+
+A **cross-entry destination collision check** runs at validation time: two
+entries (or two array-expanded sub-entries) writing into the same
+`<target>/<destName>/` directory are rejected with a clear error pointing at
+both offenders. Rename one (set `name`, supply `as`) to disambiguate.
+
+### Aliases (giving a source a name without an outer `name` field)
+
+When you want the destination folder to be something other than the
+source-derived default &mdash; especially inside an array source &mdash;
+Conduit accepts two equivalent shorthand forms:
+
+```jsonc
+// In-string arrow suffix. The portion after ' -> ' must match [A-Za-z0-9._-]+.
+"source": "https://github.com/anthropics/skills/code-review -> CodeReview"
+
+// Object wrapper. Works around any inner source shape (string, full object).
+"source": { "source": "https://github.com/anthropics/skills/code-review", "as": "CodeReview" }
+```
+
+Both set the entry's name to `CodeReview`. The wrapper form is more
+flexible (the inner source can be a concrete `{type: "github", ...}` object);
+the arrow form is terser for single-line array elements.
 
 ### Targets with explicit aliases
 
@@ -392,7 +465,7 @@ This keeps the simple case ergonomic ("name the entry after the skill, target ge
 |-----------------------------|----------|-------|
 | `version`                   | yes      | Schema version. Currently `1`. |
 | `entries[]`                 | yes      | At least one. |
-| `entries[].name`            | yes      | `[A-Za-z0-9._-]+`. Used as the destination subdirectory when the source produces exactly one content unit; metadata only otherwise. Must be unique within the manifest. |
+| `entries[].name`            | no       | `[A-Za-z0-9._-]+`. Optional: when omitted Conduit derives a default from the source (GitHub/AzDO repo name, single-path local directory basename) or from an explicit alias (`"... -> Name"` shorthand or `{ "source": ..., "as": "Name" }` wrapper). Used as the destination subdirectory when the source produces exactly one content unit; metadata only otherwise. Must be unique within the manifest. |
 | `entries[].description`     | no       | Free-form documentation; ignored at runtime. |
 | `entries[].disabled`        | no       | `true` skips the entry during `sync`. |
 | `entries[].source.type`     | yes      | `"github"`, `"azdo"`, `"local"`, or `"uri"` (auto-detect). The discriminator for future source kinds. |

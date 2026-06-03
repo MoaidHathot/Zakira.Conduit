@@ -37,6 +37,14 @@ public static class ManifestValidator
             ValidateEntry(manifest.Entries[i], i, seenNames, errors);
         }
 
+        // Cross-entry destination collision: two entries (or two
+        // array-expanded sub-entries) must not produce the same destination
+        // directory inside the same target. Today's per-entry checks only
+        // catch within-entry collisions; this catches the case where two
+        // independent entries pick the same source-derived name (e.g. both
+        // resolve to a repo called "skills") into the same target.
+        ValidateCrossEntryDestinations(manifest, errors);
+
         return errors;
     }
 
@@ -46,7 +54,10 @@ public static class ManifestValidator
 
         if (string.IsNullOrWhiteSpace(entry.Name))
         {
-            errors.Add($"{prefix}.name must be a non-empty string.");
+            errors.Add(
+                $"{prefix}.name could not be determined. Either set 'name' on the entry, supply an explicit alias " +
+                $"(\"...source -> Name\" or {{ \"source\": ..., \"as\": \"Name\" }}), or use a source kind whose " +
+                $"identity yields a default name (a GitHub/AzDO repo, or a local directory).");
         }
         else if (!IsValidEntryName(entry.Name))
         {
@@ -110,6 +121,10 @@ public static class ManifestValidator
 
             case UriBasedSkillSource:
                 errors.Add($"{prefix}.source: 'uri'-shaped source reached the validator without being resolved. This is a wiring bug; ensure the manifest loader's inference coordinator is registered.");
+                break;
+
+            case AliasedSkillSource:
+                errors.Add($"{prefix}.source: aliased wrapper source reached the validator without being unwrapped. This is a wiring bug; ensure the manifest loader's inference coordinator is registered.");
                 break;
 
             default:
@@ -277,4 +292,110 @@ public static class ManifestValidator
 
         return true;
     }
+
+    /// <summary>
+    ///     Detects two entries that would write into the same destination
+    ///     directory (<c>&lt;targetPath&gt;/&lt;destName&gt;/</c>). The check
+    ///     is conservative: it compares target path <i>strings</i> as-written
+    ///     (after light normalisation), without resolving <c>~</c>,
+    ///     environment variables, or symlinks. So
+    ///     <c>~/skills</c> vs <c>$HOME/skills</c> won't be flagged even when
+    ///     they resolve to the same directory; that's acceptable because the
+    ///     common collision case (two entries literally targeting the same
+    ///     directory string with the same dest name) is what bites in practice.
+    /// </summary>
+    private static void ValidateCrossEntryDestinations(ConduitManifest manifest, List<string> errors)
+    {
+        // Map: (targetPath, destName) -> first-seen owning entry name.
+        var seen = new Dictionary<DestinationKey, string>();
+
+        for (var i = 0; i < manifest.Entries.Count; i++)
+        {
+            var entry = manifest.Entries[i];
+            if (string.IsNullOrWhiteSpace(entry.Name) || entry.Targets is null || entry.Targets.Count == 0)
+            {
+                // Per-entry validation already errored; skip to avoid noise.
+                continue;
+            }
+
+            foreach (var destination in EnumerateDestinations(entry))
+            {
+                if (seen.TryGetValue(destination, out var owner))
+                {
+                    errors.Add(
+                        $"entries[{i}].targets: destination '{destination.TargetPath}/{destination.DestName}' " +
+                        $"is already produced by entry '{owner}'. Two entries cannot write into the same " +
+                        "directory inside the same target; rename one (set 'name' or 'as').");
+                }
+                else
+                {
+                    seen[destination] = entry.Name!;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Enumerates every <c>(targetPath, destName)</c> tuple the entry
+    ///     would produce. Single-unit sources use <c>target.As ?? entry.Name</c>
+    ///     per target; multi-unit sources use each unit's resolved basename.
+    /// </summary>
+    private static IEnumerable<DestinationKey> EnumerateDestinations(ConduitEntry entry)
+    {
+        var paths = entry.Source switch
+        {
+            GitHubSkillSource gh => gh.EffectivePaths,
+            LocalDirectorySkillSource local => local.EffectivePaths,
+            AzdoSkillSource azdo => azdo.EffectivePaths,
+            _ => Array.Empty<PathSpec>(),
+        };
+
+        var isMultiUnit = paths.Count > 1;
+
+        foreach (var target in entry.Targets)
+        {
+            if (target is null || string.IsNullOrWhiteSpace(target.Path))
+            {
+                continue;
+            }
+
+            var normalizedTarget = NormalizeTargetPath(target.Path);
+
+            if (isMultiUnit)
+            {
+                foreach (var spec in paths)
+                {
+                    var destName = spec.ResolvedBasename.Trim();
+                    if (!string.IsNullOrEmpty(destName))
+                    {
+                        yield return new DestinationKey(normalizedTarget, destName);
+                    }
+                }
+            }
+            else
+            {
+                var destName = string.IsNullOrWhiteSpace(target.As) ? entry.Name : target.As;
+                if (!string.IsNullOrWhiteSpace(destName))
+                {
+                    yield return new DestinationKey(normalizedTarget, destName!);
+                }
+            }
+        }
+    }
+
+    private static string NormalizeTargetPath(string path)
+    {
+        // Normalise separators and trim trailing slash so equivalent
+        // string-forms collapse to one key. Don't resolve env vars / ~ here —
+        // the collision check is best-effort and only catches literal matches.
+        var normalized = path.Trim().Replace('\\', '/');
+        if (normalized.Length > 1 && normalized.EndsWith('/'))
+        {
+            normalized = normalized.TrimEnd('/');
+        }
+
+        return normalized;
+    }
+
+    private readonly record struct DestinationKey(string TargetPath, string DestName);
 }

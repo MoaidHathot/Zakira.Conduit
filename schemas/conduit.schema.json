@@ -22,13 +22,13 @@
   "$defs": {
     "entry": {
       "type": "object",
-      "required": ["name", "source", "targets"],
+      "required": ["source", "targets"],
       "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string",
           "pattern": "^[A-Za-z0-9._-]+$",
-          "description": "Unique entry identifier. Used as the destination sub-directory name when the source produces exactly one content unit; used only for filtering / logs when the source produces multiple units."
+          "description": "Unique entry identifier. Optional: when omitted, Conduit derives a default from the source (GitHub/AzDO repo name, local directory basename, etc.), or uses the alias supplied via the in-string '... -> Name' shorthand or the { 'source': ..., 'as': 'Name' } wrapper. Used as the destination sub-directory name when the source produces exactly one content unit; used only for filtering / logs when the source produces multiple units."
         },
         "description": { "type": "string" },
         "disabled": { "type": "boolean", "default": false },
@@ -58,6 +58,7 @@
       "oneOf": [
         { "$ref": "#/$defs/sourceShorthand" },
         { "$ref": "#/$defs/sourceArray" },
+        { "$ref": "#/$defs/aliasedSource" },
         { "$ref": "#/$defs/githubSource" },
         { "$ref": "#/$defs/localSource" },
         { "$ref": "#/$defs/azdoSource" },
@@ -67,15 +68,31 @@
     "sourceShorthand": {
       "type": "string",
       "minLength": 1,
-      "description": "Bare-URI shorthand. Equivalent to { \"type\": \"uri\", \"uri\": \"<value>\" }. The same strict prefix rules (./, ../, /, ~, $, %, drive letters, full URLs) apply. Bare slugs (owner/repo) are rejected; use the explicit object form for those."
+      "description": "Bare-URI shorthand. Equivalent to { \"type\": \"uri\", \"uri\": \"<value>\" }. May optionally suffix the URI with ' -> Name' to set the destination alias (e.g. \"https://github.com/owner/repo -> MyName\"); the alias must match ^[A-Za-z0-9._-]+$. The same strict URI prefix rules (./, ../, /, ~, $, %, drive letters, full URLs) apply to the URI portion. Bare slugs (owner/repo) are rejected; use the explicit object form for those."
+    },
+    "aliasedSource": {
+      "type": "object",
+      "required": ["source", "as"],
+      "additionalProperties": false,
+      "description": "Wrapper that pairs any inner source (bare-URI shorthand, concrete source object, or nested wrapper-free shape) with an explicit destination alias. Equivalent to the in-string '... -> Name' shorthand but works for inner sources that are full objects, not just bare strings.",
+      "properties": {
+        "source": { "$ref": "#/$defs/source" },
+        "as": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "description": "Destination alias. Becomes the owning entry's name when no 'name' is set on the entry, and (for array elements) the per-element name."
+        }
+      }
     },
     "sourceArray": {
       "type": "array",
       "minItems": 1,
-      "description": "Array of sources. Each element is either a bare-string URI or a full source object. The entry is expanded at load time into one independent sub-entry per element (same name prefix, own state, own targets). Per-target 'as' aliases are not allowed on entries declared this way.",
+      "description": "Array of sources. Each element is either a bare-string URI (optionally with ' -> Name' alias suffix), a wrapper object ({ 'source': ..., 'as': 'Name' }), or a full source object. The entry is expanded at load time into one independent sub-entry per element. Per-target 'as' aliases are not allowed on entries declared this way.",
       "items": {
         "oneOf": [
           { "$ref": "#/$defs/sourceShorthand" },
+          { "$ref": "#/$defs/aliasedSource" },
           { "$ref": "#/$defs/githubSource" },
           { "$ref": "#/$defs/localSource" },
           { "$ref": "#/$defs/azdoSource" },

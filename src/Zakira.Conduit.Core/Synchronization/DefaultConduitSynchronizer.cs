@@ -74,7 +74,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
         foreach (var (entry, index) in ordered)
         {
-            if (entryFilter is not null && !entryFilter.Contains(entry.Name))
+            if (entryFilter is not null && !entryFilter.Contains(entry.ResolvedName))
             {
                 preSkippedResults[index] = SkippedResult(entry);
                 continue;
@@ -82,7 +82,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
             if (entry.Disabled)
             {
-                _logger.LogInformation("Skipping disabled entry '{Name}'.", entry.Name);
+                _logger.LogInformation("Skipping disabled entry '{Name}'.", entry.ResolvedName);
                 preSkippedResults[index] = SkippedResult(entry);
                 continue;
             }
@@ -117,7 +117,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
             if (!result.Succeeded && options.StopOnFirstError)
             {
                 Interlocked.Exchange(ref stopRequested, 1);
-                _logger.LogError("Aborting sync due to first error in entry '{Name}'.", tuple.entry.Name);
+                _logger.LogError("Aborting sync due to first error in entry '{Name}'.", tuple.entry.ResolvedName);
             }
         }).ConfigureAwait(false);
 
@@ -163,7 +163,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
     private async Task<SyncEntryResult> SyncEntryAsync(ConduitEntry entry, string manifestFullPath, string manifestDir, SyncOptions options, ConduitState state, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
-        var previousState = _stateStore.GetEntry(state, entry.Name);
+        var previousState = _stateStore.GetEntry(state, entry.ResolvedName);
 
         // Pre-flight skip: applies only when we can be sure the upstream content
         // hasn't changed without going to network. Today that's commit-pinned
@@ -173,7 +173,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         string? localSourceHash = null;
         if (!options.Force && CanShortCircuit(entry, previousState, manifestDir, out localSourceHash))
         {
-            _logger.LogInformation("Skipping '{Name}': source unchanged and all targets present.", entry.Name);
+            _logger.LogInformation("Skipping '{Name}': source unchanged and all targets present.", entry.ResolvedName);
             sw.Stop();
             return new SyncEntryResult(
                 entry,
@@ -185,7 +185,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 Elapsed: sw.Elapsed);
         }
 
-        _logger.LogInformation("Syncing entry '{Name}' from {Kind}", entry.Name, entry.Source.Kind);
+        _logger.LogInformation("Syncing entry '{Name}' from {Kind}", entry.ResolvedName, entry.Source.Kind);
 
         FetchedSource? fetched = null;
         var attemptedRetryWithoutEtag = false;
@@ -217,18 +217,18 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                     .Select(targetSpec =>
                     {
                         var resolvedParent = _pathResolver.Resolve(targetSpec.Path, manifestDir);
-                        var destName = targetSpec.As ?? entry.Name;
+                        var destName = targetSpec.As ?? entry.ResolvedName;
                         return Path.Combine(resolvedParent, destName);
                     })
                     .ToList();
 
                 if (targetsResolved.All(Directory.Exists))
                 {
-                    _logger.LogInformation("304 Not Modified for '{Name}'; targets are present.", entry.Name);
+                    _logger.LogInformation("304 Not Modified for '{Name}'; targets are present.", entry.ResolvedName);
 
                     if (!options.DryRun)
                     {
-                        _stateStore.UpdateEntry(state, entry.Name, new EntryState
+                        _stateStore.UpdateEntry(state, entry.ResolvedName, new EntryState
                         {
                             ResolvedRef = previousState?.ResolvedRef ?? fetched.ResolvedRef,
                             Etag = fetched.Etag ?? previousState?.Etag,
@@ -254,7 +254,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 // sends the full body.
                 if (attemptedRetryWithoutEtag)
                 {
-                    _logger.LogWarning("'{Name}': source unchanged but one or more targets remain missing after retry.", entry.Name);
+                    _logger.LogWarning("'{Name}': source unchanged but one or more targets remain missing after retry.", entry.ResolvedName);
                     sw.Stop();
                     return new SyncEntryResult(
                         entry,
@@ -266,7 +266,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                         Elapsed: sw.Elapsed);
                 }
 
-                _logger.LogInformation("'{Name}': server replied 304 but a target is missing; retrying without ETag.", entry.Name);
+                _logger.LogInformation("'{Name}': server replied 304 but a target is missing; retrying without ETag.", entry.ResolvedName);
                 attemptedRetryWithoutEtag = true;
                 // Loop to re-fetch without the etag hint.
             }
@@ -289,12 +289,12 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                     cancellationToken.ThrowIfCancellationRequested();
 
                     // Per design:
-                    //   - single unit: destination = target.As (per-target alias) ?? entry.Name
+                    //   - single unit: destination = target.As (per-target alias) ?? entry.ResolvedName
                     //   - multi unit:  destination = unit.SuggestedDestinationName (path basename / alias)
                     string destName;
                     if (singleUnit)
                     {
-                        destName = targetSpec.As ?? entry.Name;
+                        destName = targetSpec.As ?? entry.ResolvedName;
                     }
                     else
                     {
@@ -326,7 +326,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
-                        _logger.LogError(ex, "Failed to mirror entry '{Name}' into target '{Target}'", entry.Name, resolvedTarget);
+                        _logger.LogError(ex, "Failed to mirror entry '{Name}' into target '{Target}'", entry.ResolvedName, resolvedTarget);
                         targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: false, FilesWritten: 0, Error: ex.Message));
                     }
                 }
@@ -337,7 +337,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
             // Persist updated state for the entry on real runs only.
             if (allOk && !options.DryRun)
             {
-                _stateStore.UpdateEntry(state, entry.Name, new EntryState
+                _stateStore.UpdateEntry(state, entry.ResolvedName, new EntryState
                 {
                     ResolvedRef = fetched.ResolvedRef,
                     Etag = fetched.Etag,
@@ -357,7 +357,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
-            _logger.LogError(ex, "Failed to sync entry '{Name}'", entry.Name);
+            _logger.LogError(ex, "Failed to sync entry '{Name}'", entry.ResolvedName);
             return new SyncEntryResult(entry, Skipped: false, Succeeded: false, ResolvedRef: null, Targets: Array.Empty<SyncTargetResult>(), Error: ex.Message, Elapsed: sw.Elapsed);
         }
         finally
@@ -446,7 +446,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
     {
         if (local.EffectivePaths.Count > 1)
         {
-            // Multi-path local: destinations are basenames; the simple "entry.name"
+            // Multi-path local: destinations are basenames; the simple "entry.ResolvedName"
             // mapping doesn't apply. Skip the optimisation conservatively.
             return false;
         }
@@ -459,7 +459,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         var sameComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
         var expectedTargets = entry.Targets
-            .Select(targetSpec => Path.Combine(_pathResolver.Resolve(targetSpec.Path, manifestDir), targetSpec.As ?? entry.Name))
+            .Select(targetSpec => Path.Combine(_pathResolver.Resolve(targetSpec.Path, manifestDir), targetSpec.As ?? entry.ResolvedName))
             .ToList();
 
         return expectedTargets.All(t =>

@@ -35,7 +35,7 @@ internal static class ReportRenderer
             elapsedMs = (long)report.Elapsed.TotalMilliseconds,
             entries = report.Entries.Select(e => new
             {
-                name = e.Entry.Name,
+                name = e.Entry.ResolvedName,
                 kind = e.Entry.Source.Kind,
                 skipped = e.Skipped,
                 succeeded = e.Succeeded,
@@ -72,14 +72,14 @@ internal static class ReportRenderer
             if (entry.Skipped)
             {
                 skipped++;
-                Console.WriteLine($"  {style.Dim("~")} {style.Dim(entry.Entry.Name)}  {style.Dim("(skipped)")}");
+                Console.WriteLine($"  {style.Dim("~")} {style.Dim(entry.Entry.ResolvedName)}  {style.Dim("(skipped)")}");
                 continue;
             }
 
             if (!entry.Succeeded)
             {
                 failed++;
-                Console.WriteLine($"  {style.Red("X")} {entry.Entry.Name}  {style.Dim($"(failed in {entry.Elapsed.TotalSeconds:0.0}s)")}");
+                Console.WriteLine($"  {style.Red("X")} {entry.Entry.ResolvedName}  {style.Dim($"(failed in {entry.Elapsed.TotalSeconds:0.0}s)")}");
                 if (!string.IsNullOrEmpty(entry.Error))
                 {
                     Console.WriteLine($"      {style.Red("error:")} {entry.Error}");
@@ -89,7 +89,7 @@ internal static class ReportRenderer
             {
                 succeeded++;
                 var refStr = string.IsNullOrEmpty(entry.ResolvedRef) ? string.Empty : style.Cyan($" @{entry.ResolvedRef}");
-                Console.WriteLine($"  {style.Green("+")} {entry.Entry.Name}{refStr}  {style.Dim($"({entry.Elapsed.TotalSeconds:0.0}s)")}");
+                Console.WriteLine($"  {style.Green("+")} {entry.Entry.ResolvedName}{refStr}  {style.Dim($"({entry.Elapsed.TotalSeconds:0.0}s)")}");
             }
 
             foreach (var target in entry.Targets)

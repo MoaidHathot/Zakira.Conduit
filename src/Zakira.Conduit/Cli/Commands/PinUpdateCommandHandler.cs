@@ -69,7 +69,7 @@ internal sealed class PinUpdateCommandHandler
         for (var i = 0; i < model.Entries.Count; i++)
         {
             var entry = model.Entries[i];
-            if (filter is not null && !filter.Contains(entry.Name))
+            if (filter is not null && !filter.Contains(entry.ResolvedName))
             {
                 continue;
             }
@@ -78,7 +78,7 @@ internal sealed class PinUpdateCommandHandler
             {
                 if (string.IsNullOrWhiteSpace(gh.Branch))
                 {
-                    skipped.Add((entry.Name, "no 'branch' field to resolve"));
+                    skipped.Add((entry.ResolvedName, "no 'branch' field to resolve"));
                     continue;
                 }
 
@@ -89,16 +89,16 @@ internal sealed class PinUpdateCommandHandler
 
                     if (string.Equals(oldCommit, newSha, StringComparison.OrdinalIgnoreCase))
                     {
-                        skipped.Add((entry.Name, $"already at {Shorten(newSha)}"));
+                        skipped.Add((entry.ResolvedName, $"already at {Shorten(newSha)}"));
                         continue;
                     }
 
-                    updates.Add((i, entry.Name, oldCommit, newSha, gh.Branch));
+                    updates.Add((i, entry.ResolvedName, oldCommit, newSha, gh.Branch));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Failed to resolve branch '{Branch}' for entry '{Name}'", gh.Branch, entry.Name);
-                    errors.Add((entry.Name, ex.Message));
+                    _logger.LogError(ex, "Failed to resolve branch '{Branch}' for entry '{Name}'", gh.Branch, entry.ResolvedName);
+                    errors.Add((entry.ResolvedName, ex.Message));
                 }
 
                 continue;
@@ -113,7 +113,7 @@ internal sealed class PinUpdateCommandHandler
 
                 if (intentValue is null || intentKind is null)
                 {
-                    skipped.Add((entry.Name, "no 'branch' or 'tag' field to resolve"));
+                    skipped.Add((entry.ResolvedName, "no 'branch' or 'tag' field to resolve"));
                     continue;
                 }
 
@@ -124,22 +124,22 @@ internal sealed class PinUpdateCommandHandler
 
                     if (string.Equals(oldCommit, newSha, StringComparison.OrdinalIgnoreCase))
                     {
-                        skipped.Add((entry.Name, $"already at {Shorten(newSha)}"));
+                        skipped.Add((entry.ResolvedName, $"already at {Shorten(newSha)}"));
                         continue;
                     }
 
-                    updates.Add((i, entry.Name, oldCommit, newSha, intentValue));
+                    updates.Add((i, entry.ResolvedName, oldCommit, newSha, intentValue));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogError(ex, "Failed to resolve {Kind} '{Ref}' for entry '{Name}'", intentKind, intentValue, entry.Name);
-                    errors.Add((entry.Name, ex.Message));
+                    _logger.LogError(ex, "Failed to resolve {Kind} '{Ref}' for entry '{Name}'", intentKind, intentValue, entry.ResolvedName);
+                    errors.Add((entry.ResolvedName, ex.Message));
                 }
 
                 continue;
             }
 
-            skipped.Add((entry.Name, $"unsupported source kind '{entry.Source.Kind}'"));
+            skipped.Add((entry.ResolvedName, $"unsupported source kind '{entry.Source.Kind}'"));
         }
 
         // Build the new manifest with updated commits.

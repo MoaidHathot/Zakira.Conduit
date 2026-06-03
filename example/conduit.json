@@ -58,6 +58,33 @@
       "targets": [
         "~/.config/claude/skills"
       ]
+    },
+    {
+      "description": "Name omitted: Conduit derives 'McpLense' from the GitHub repo name. Demonstrates that aliases and source-derived names are first-class so 'name' becomes optional.",
+      "disabled": true,
+      "source": "https://github.com/MoaidHathot/McpLense/tree/main/skills",
+      "targets": [
+        "~/.config/zed/skills"
+      ]
+    },
+    {
+      "description": "Aliased shorthand: in-string ' -> Name' overrides both the source-derived default and the missing entry name.",
+      "disabled": true,
+      "source": "https://github.com/anthropics/skills/code-review -> Reviewer",
+      "targets": [
+        "~/.config/zed/skills"
+      ]
+    },
+    {
+      "description": "Object wrapper alias: works around an inner concrete source.",
+      "disabled": true,
+      "source": {
+        "source": { "type": "github", "repo": "anthropics/skills", "path": "test-writer", "branch": "main" },
+        "as": "Tester"
+      },
+      "targets": [
+        "~/.config/zed/skills"
+      ]
     }
   ]
 }
