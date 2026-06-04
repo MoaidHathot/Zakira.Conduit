@@ -321,16 +321,26 @@ When in doubt, keep using the explicit `"type": ...` form. It is and will remain
 
 #### URL sub-paths and refs in inferred sources
 
-When a URI is itself a browse URL with extra path segments, the inferrer harvests
-them into the equivalent `path` (and, for GitHub `tree`/`blob`/`raw` URLs, `branch`)
-fields automatically:
+When a URI is itself a browse URL with extra path segments, the inferrer
+harvests them into the equivalent `path` (and, for GitHub `tree`/`blob`/`raw`
+URLs, `branch`) fields automatically. The short form &mdash; just append the
+sub-path to the repo URL &mdash; is the recommended default; the longer
+`/tree/<branch>/...` form is supported for when you want to lock the entry
+to a specific branch at the same time:
 
-| Pasted URI                                                                | Inferred source                                                 |
-|---------------------------------------------------------------------------|-----------------------------------------------------------------|
-| `https://github.com/anthropics/skills/code-review`                        | `github` repo `anthropics/skills`, path `code-review`           |
-| `https://github.com/anthropics/skills/tree/main/code-review/sub`          | `github` repo, branch `main`, path `code-review/sub`            |
-| `https://dev.azure.com/contoso/Conduit/_git/agent-skills/skills/x`        | `azdo` repo, path `skills/x`                                    |
-| `https://dev.azure.com/contoso/Conduit/_git/agent-skills?version=GBmain&path=/skills` | `azdo` repo, branch `main`, path `skills` (from `?path=`) |
+| Pasted URI                                                                | Inferred source                                                          |
+|---------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| `https://github.com/anthropics/skills`                                    | `github` repo `anthropics/skills`, whole repo, default branch            |
+| `https://github.com/anthropics/skills/code-review`                        | `github` repo, path `code-review`, default branch                        |
+| `https://github.com/anthropics/skills/tree/main/code-review/sub`          | `github` repo, branch `main`, path `code-review/sub`                     |
+| `https://dev.azure.com/contoso/Conduit/_git/agent-skills/skills/x`        | `azdo` repo, path `skills/x`                                             |
+| `https://dev.azure.com/contoso/Conduit/_git/agent-skills?version=GBmain&path=/skills` | `azdo` repo, branch `main`, path `skills` (from `?path=`)    |
+
+Tip: omit `/tree/<branch>/` whenever you're happy tracking the default
+branch &mdash; Conduit resolves it at fetch time. Add it back (or set
+`branch` explicitly on the object form) when you need a non-default branch,
+or when you want `conduit pin` / `update` to be able to lock that entry to
+a specific SHA (pin needs to know which branch to follow).
 
 Setting an explicit `path`/`paths`/`branch` on the same source while the URL
 *also* carries one is rejected as a contradiction.
@@ -346,18 +356,16 @@ independent sub-entry that shares the parent's `targets`, `description`, and
 
 ```jsonc
 // Common case: drop 'name' entirely; each element's destination folder is
-// the repo (or local-dir) name.
+// the repo (or local-dir) name. Bare-repo URLs grab the default branch;
+// append '/<sub-path>' to mirror just a sub-tree (still default branch).
 {
   "source": [
-    "https://github.com/MoaidHathot/ActionView/tree/main/skills",
-    "https://github.com/MoaidHathot/PowerReview/tree/main/skills",
+    "https://github.com/MoaidHathot/ActionView/skills",
+    "https://github.com/MoaidHathot/PowerReview/skills",
     "./local-skill-sample"
   ],
   "targets": ["~/.config/claude/skills"]
 }
-// -> ~/.config/claude/skills/ActionView/
-// -> ~/.config/claude/skills/PowerReview/
-// -> ~/.config/claude/skills/local-skill-sample/
 ```
 
 Override an individual element's destination name with either shorthand:
@@ -410,10 +418,10 @@ AzDO repo name, or the local directory basename (for single-path local
 sources). It lets you drop `name` entirely on the common single-unit case:
 
 ```jsonc
-{ "source": "https://github.com/MoaidHathot/ActionView/tree/main/skills",
+{ "source": "https://github.com/MoaidHathot/ActionView/skills",
   "targets": ["~/.config/claude/skills"] }
 // -> ~/.config/claude/skills/ActionView/
-//    (repo name 'ActionView', not the sub-path basename 'skills')
+//    (repo name 'ActionView', not the sub-path basename 'skills'; tracks the default branch)
 ```
 
 This keeps the simple case ergonomic ("name the entry after the skill, target gets one folder by that name") while letting one entry mirror N skills out of one source with a single fetch.

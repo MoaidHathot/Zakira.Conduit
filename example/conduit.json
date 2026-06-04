@@ -60,9 +60,9 @@
       ]
     },
     {
-      "description": "Name omitted: Conduit derives 'McpLense' from the GitHub repo name. Demonstrates that aliases and source-derived names are first-class so 'name' becomes optional.",
+      "description": "Name omitted: Conduit derives 'McpLense' from the GitHub repo name. Bare-URL shorthand: the '/skills' tail is harvested as the sub-path; no '/tree/<branch>/' needed because we're happy tracking the default branch.",
       "disabled": true,
-      "source": "https://github.com/MoaidHathot/McpLense/tree/main/skills",
+      "source": "https://github.com/MoaidHathot/McpLense/skills",
       "targets": [
         "~/.config/zed/skills"
       ]
