@@ -18,4 +18,14 @@ public interface IGitHubRefResolver
     /// </summary>
     /// <param name="gitRef">A branch name, tag, or commit SHA.</param>
     Task<string> ResolveAsync(string owner, string repo, string gitRef, AuthenticationHeaderValue? authHeader = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Returns the repository's default branch name (e.g. <c>"main"</c>
+    ///     or <c>"master"</c>). Hits <c>GET /repos/{owner}/{repo}</c> and
+    ///     reads the <c>default_branch</c> field. Used by <c>pin</c> /
+    ///     <c>update</c> when an entry doesn't specify a branch explicitly:
+    ///     the resolver discovers the repo's default, then pins to its tip
+    ///     just as it would for an author-supplied branch.
+    /// </summary>
+    Task<string> GetDefaultBranchAsync(string owner, string repo, AuthenticationHeaderValue? authHeader = null, CancellationToken cancellationToken = default);
 }

@@ -29,7 +29,7 @@
 - **Parallel by default.** Entries sync concurrently (`--parallel N`, default 4). Sequential mode is opt-in (`--parallel 1`).
 - **JSON output for scripting.** Every command supports `--output json`; logs are routed to stderr so stdout stays pure for `jq`.
 - **TTY-aware colours.** ANSI colours when stdout is a terminal; plain text in pipes or when `NO_COLOR` is set.
-- **Pin & update for reproducibility.** `conduit pin` locks every branch-tracked entry to its current SHA; `conduit update` is the same operation under a refresh-flavoured verb. `branch` is kept as the tracking intent so the next `update` knows what to bump.
+- **Pin & update for reproducibility.** `conduit pin` locks every GitHub or AzDO entry to its current SHA; `conduit update` is the same operation under a refresh-flavoured verb. When `branch` is omitted, pin discovers the repo's default branch (one extra API call, cached per run) and writes both the branch and the resolved commit back into the manifest, so subsequent `pin`/`update` calls can refresh without re-discovering. Bare-string GitHub URLs are transparently rewritten into the explicit `{type:"github", repo, path?, branch, commit}` form when pinned.
 - **Atomic mirroring.** Each target is written via a sibling staging directory and swapped in place, so a failure cannot leave a half-updated target.
 - **Stale files are removed.** When a source changes, files that disappeared upstream disappear locally too &mdash; without nuking unrelated content in the same target directory.
 - **`conduit watch`.** Re-runs the sync whenever the manifest changes on disk, with debounced burst-write coalescing.
@@ -337,10 +337,13 @@ to a specific branch at the same time:
 | `https://dev.azure.com/contoso/Conduit/_git/agent-skills?version=GBmain&path=/skills` | `azdo` repo, branch `main`, path `skills` (from `?path=`)    |
 
 Tip: omit `/tree/<branch>/` whenever you're happy tracking the default
-branch &mdash; Conduit resolves it at fetch time. Add it back (or set
-`branch` explicitly on the object form) when you need a non-default branch,
-or when you want `conduit pin` / `update` to be able to lock that entry to
-a specific SHA (pin needs to know which branch to follow).
+branch &mdash; Conduit resolves it at fetch time. `conduit pin` / `update`
+also work fine on these: they discover the repo's default branch via the
+GitHub API (one extra call, cached per run) and then write both `branch`
+and `commit` back into the manifest, converting bare-string sources to
+the explicit object form along the way. Add `/tree/<branch>/` (or set
+`branch` explicitly on the object form) up-front when you want a specific
+non-default branch.
 
 Setting an explicit `path`/`paths`/`branch` on the same source while the URL
 *also* carries one is rejected as a contradiction.
@@ -504,7 +507,7 @@ conduit [--manifest <path>] [--verbosity <level>|--quiet|--verbose] [--output te
 | `conduit validate` | Parse and validate the manifest. **Does not** touch the network. |
 | `conduit list` | Print a one-line summary of every entry. |
 | `conduit sync [options]` | Fetch sources and mirror them into each target. |
-| `conduit pin [options]` | For every github entry that tracks a `branch`, resolve the branch tip's SHA and write it into `commit` (keeping `branch` as the tracking intent). |
+| `conduit pin [options]` | For every GitHub / AzDO entry that tracks a `branch`, resolve the branch tip's SHA and write it into `commit` (keeping `branch` as the tracking intent). For GitHub entries without an explicit `branch`, pin discovers the repo's default branch via the GitHub API and writes both `branch` and `commit` back, so subsequent runs can refresh. Bare-string source URLs are rewritten to the explicit object form. |
 | `conduit update [options]` | Alias of `pin`; refresh-flavoured verb. |
 | `conduit watch [options]` | Run an initial sync, then re-sync whenever the manifest changes on disk. Ctrl+C to stop. |
 

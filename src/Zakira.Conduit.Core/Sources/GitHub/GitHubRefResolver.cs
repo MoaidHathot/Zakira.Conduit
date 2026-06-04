@@ -89,4 +89,59 @@ public sealed class GitHubRefResolver : IGitHubRefResolver
 
         return sha;
     }
+
+    /// <inheritdoc />
+    public async Task<string> GetDefaultBranchAsync(string owner, string repo, AuthenticationHeaderValue? authHeader = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repo);
+
+        var requestUri = $"repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repo)}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.UserAgent.ParseAdd(_options.UserAgent);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+
+        if (authHeader is not null)
+        {
+            request.Headers.Authorization = authHeader;
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.Token))
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.Token);
+        }
+
+        _logger.LogDebug("GET {Uri} (default-branch lookup)", requestUri);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new GitHubDownloadException(
+                $"GitHub returned {(int)response.StatusCode} {response.StatusCode} when looking up the default branch for '{owner}/{repo}'.{(string.IsNullOrEmpty(body) ? string.Empty : " Body: " + body)}",
+                response.StatusCode);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (!doc.RootElement.TryGetProperty("default_branch", out var element) || element.ValueKind != JsonValueKind.String)
+        {
+            throw new GitHubDownloadException(
+                $"GitHub response for '{owner}/{repo}' did not include a 'default_branch' field.",
+                HttpStatusCode.OK);
+        }
+
+        var branch = element.GetString();
+        if (string.IsNullOrEmpty(branch))
+        {
+            throw new GitHubDownloadException(
+                $"GitHub returned an empty default branch for '{owner}/{repo}'.",
+                HttpStatusCode.OK);
+        }
+
+        return branch;
+    }
 }

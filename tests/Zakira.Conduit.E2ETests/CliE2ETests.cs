@@ -656,17 +656,101 @@ public sealed class CliE2ETests
     }
 
     [Fact]
-    public async Task pin_skips_entries_without_a_branch_with_a_clear_message()
+    public async Task pin_discovers_default_branch_when_none_is_set_and_writes_branch_plus_commit()
     {
         using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+        const string sha = "abcdef0123456789abcdef0123456789abcdef01";
+
+        // Register the more-specific commits/main route FIRST: MockGitHubServer
+        // matches routes in registration order using a StartsWith prefix check,
+        // and "/repos/acme/skills" would otherwise swallow this path too.
+        server.Map("/repos/acme/skills/commits/main", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes($"{{\"sha\":\"{sha}\"}}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+
+        // Default-branch discovery: GET /repos/acme/skills -> {"default_branch": "main"}
+        server.Map("/repos/acme/skills", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes("{\"default_branch\":\"main\"}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+
         var manifestPath = tmp.Combine("conduit.json");
         await File.WriteAllTextAsync(manifestPath, """
-            { "version": 1, "entries": [ { "name": "demo", "source": { "type": "github", "repo": "acme/skills", "commit": "0000000000000000000000000000000000000000" }, "targets": ["./out"] } ] }
+            { "version": 1, "entries": [ { "name": "demo", "source": { "type": "github", "repo": "acme/skills" }, "targets": ["./out"] } ] }
             """);
 
-        var result = await ConduitCli.RunAsync(["pin", "--manifest", manifestPath]);
-        result.ExitCode.Should().Be(0);
-        result.StdOut.Should().Contain("no 'branch' field");
+        var env = new Dictionary<string, string?> { ["CONDUIT_GITHUB_API_BASE"] = server.BaseAddress.ToString() };
+        var result = await ConduitCli.RunAsync(["pin", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        var written = await File.ReadAllTextAsync(manifestPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(written);
+        var entry = doc.RootElement.GetProperty("entries")[0];
+        entry.GetProperty("source").GetProperty("branch").GetString().Should().Be("main",
+            because: "the discovered default branch should be written back so future pins can refresh");
+        entry.GetProperty("source").GetProperty("commit").GetString().Should().Be(sha);
+    }
+
+    [Fact]
+    public async Task pin_converts_bare_string_github_source_to_object_form_when_pinning()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+        const string sha = "abcdef0123456789abcdef0123456789abcdef01";
+
+        // More-specific route registered first (same reason as above).
+        server.Map("/repos/acme/skills/commits/main", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes($"{{\"sha\":\"{sha}\"}}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+        server.Map("/repos/acme/skills", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes("{\"default_branch\":\"main\"}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, """
+            { "version": 1, "entries": [ { "name": "demo", "source": "https://github.com/acme/skills/sub-path", "targets": ["./out"] } ] }
+            """);
+
+        var env = new Dictionary<string, string?> { ["CONDUIT_GITHUB_API_BASE"] = server.BaseAddress.ToString() };
+        var result = await ConduitCli.RunAsync(["pin", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        var written = await File.ReadAllTextAsync(manifestPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(written);
+        var src = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
+        src.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object,
+            because: "pinning a bare-string source rewrites it as an explicit object so branch+commit can be attached");
+        src.GetProperty("type").GetString().Should().Be("github");
+        src.GetProperty("repo").GetString().Should().Be("acme/skills");
+        src.GetProperty("path").GetString().Should().Be("sub-path");
+        src.GetProperty("branch").GetString().Should().Be("main");
+        src.GetProperty("commit").GetString().Should().Be(sha);
     }
 
     [Fact]
