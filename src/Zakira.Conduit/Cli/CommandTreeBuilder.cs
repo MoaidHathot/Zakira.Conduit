@@ -28,8 +28,9 @@ internal static class CommandTreeBuilder
         root.Subcommands.Add(BuildListCommand(services));
         root.Subcommands.Add(BuildValidateCommand(services));
         root.Subcommands.Add(BuildInitCommand(services));
-        root.Subcommands.Add(BuildPinOrUpdateCommand(services, "pin", "Resolve every github entry's tracked branch to its current SHA and write the result into the manifest's 'commit' field."));
-        root.Subcommands.Add(BuildPinOrUpdateCommand(services, "update", "Alias of 'pin'. Refresh each pinned entry to the latest SHA on its tracked branch."));
+        root.Subcommands.Add(BuildPinOrUpdateCommand(services, "pin", "Lock every GitHub / AzDO entry to a specific commit SHA by rewriting its source to the URL-native pinned form (GitHub: tree/<sha>/<path>; AzDO: ?version=GC<sha>). Already-pinned entries are skipped; run 'conduit unpin' first to refresh."));
+        root.Subcommands.Add(BuildPinOrUpdateCommand(services, "update", "Alias of 'pin'. Lock each entry to the latest commit on its tracked branch (or the repo's default branch when none is set)."));
+        root.Subcommands.Add(BuildUnpinCommand(services));
         root.Subcommands.Add(BuildWatchCommand(services));
         root.Subcommands.Add(BuildStatusCommand(services));
         root.Subcommands.Add(BuildCleanCommand(services));
@@ -278,6 +279,51 @@ internal static class CommandTreeBuilder
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
                 dryRun: parseResult.GetValue(dryRunOption),
                 yes: parseResult.GetValue(yesOption),
+                output: parseResult.GetValue(CommonOptions.Output),
+                cancellationToken: cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static Command BuildUnpinCommand(IServiceProvider services)
+    {
+        var entryOption = new Option<string[]>("--entry", "-e")
+        {
+            Description = "Limit the operation to the named entry. Repeatable, and comma-separated values are accepted (e.g. '--entry a,b -e c').",
+            AllowMultipleArgumentsPerToken = true,
+        };
+
+        var toOption = new Option<string?>("--to")
+        {
+            Description = "Branch name to thaw the pinned entry to (e.g. '--to main'). When omitted, Conduit queries the repo's default branch via the GitHub / AzDO API and falls back to 'main' if discovery fails.",
+        };
+
+        var toDefaultOption = new Option<bool>("--to-default")
+        {
+            Description = "Explicitly opt into default-branch API discovery (same as supplying no '--to' flag), but surface any discovery failure as an error rather than silently falling back to 'main'.",
+        };
+
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Report what would change, without rewriting the manifest.",
+        };
+
+        var command = new Command("unpin", "Restore branch tracking on pinned entries by rewriting tree/<sha>/<path> back to tree/<branch>/<path> (GitHub) or ?version=GC<sha> back to ?version=GB<branch> (AzDO). Object sources have their 'commit' replaced with 'branch'.");
+        command.Options.Add(entryOption);
+        command.Options.Add(toOption);
+        command.Options.Add(toDefaultOption);
+        command.Options.Add(dryRunOption);
+
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var handler = services.GetRequiredService<UnpinCommandHandler>();
+            return handler.InvokeAsync(
+                manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                entries: EntryFilter.Normalise(parseResult.GetValue(entryOption)),
+                toBranch: parseResult.GetValue(toOption),
+                toDefault: parseResult.GetValue(toDefaultOption),
+                dryRun: parseResult.GetValue(dryRunOption),
                 output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });

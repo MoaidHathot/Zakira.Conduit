@@ -57,6 +57,7 @@ public static class Program
         serviceCollection.AddSingleton<ValidateCommandHandler>();
         serviceCollection.AddSingleton<InitCommandHandler>();
         serviceCollection.AddSingleton<PinUpdateCommandHandler>();
+        serviceCollection.AddSingleton<UnpinCommandHandler>();
         serviceCollection.AddSingleton<WatchCommandHandler>();
         serviceCollection.AddSingleton<StatusCommandHandler>();
         serviceCollection.AddSingleton<CleanCommandHandler>();

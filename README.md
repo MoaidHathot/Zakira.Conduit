@@ -29,7 +29,7 @@
 - **Parallel by default.** Entries sync concurrently (`--parallel N`, default 4). Sequential mode is opt-in (`--parallel 1`).
 - **JSON output for scripting.** Every command supports `--output json`; logs are routed to stderr so stdout stays pure for `jq`.
 - **TTY-aware colours.** ANSI colours when stdout is a terminal; plain text in pipes or when `NO_COLOR` is set.
-- **Pin & update for reproducibility.** `conduit pin` locks every GitHub or AzDO entry to its current SHA; `conduit update` is the same operation under a refresh-flavoured verb. When `branch` is omitted, pin discovers the repo's default branch (one extra API call, cached per run) and writes both the branch and the resolved commit back into the manifest, so subsequent `pin`/`update` calls can refresh without re-discovering. Bare-string GitHub URLs are transparently rewritten into the explicit `{type:"github", repo, path?, branch, commit}` form when pinned.
+- **Pin / unpin / update for reproducibility.** `conduit pin` locks every GitHub / AzDO entry to a specific commit SHA by rewriting the source URL (or object) to the URL-native pinned form &mdash; GitHub becomes `tree/<sha>/<path>`, AzDO becomes `?version=GC<sha>`. `conduit unpin` reverses it, restoring branch tracking (`--to <branch>` to pick; otherwise queries the repo's default branch and falls back to `main`). `conduit update` is an alias of `pin` for the refresh-flavoured verb. Already-pinned entries are skipped with a pointer at `unpin`; pin is intentionally one-way so the user's branch choice is never silently lost.
 - **Atomic mirroring.** Each target is written via a sibling staging directory and swapped in place, so a failure cannot leave a half-updated target.
 - **Stale files are removed.** When a source changes, files that disappeared upstream disappear locally too &mdash; without nuking unrelated content in the same target directory.
 - **`conduit watch`.** Re-runs the sync whenever the manifest changes on disk, with debounced burst-write coalescing.
@@ -507,8 +507,9 @@ conduit [--manifest <path>] [--verbosity <level>|--quiet|--verbose] [--output te
 | `conduit validate` | Parse and validate the manifest. **Does not** touch the network. |
 | `conduit list` | Print a one-line summary of every entry. |
 | `conduit sync [options]` | Fetch sources and mirror them into each target. |
-| `conduit pin [options]` | For every GitHub / AzDO entry that tracks a `branch`, resolve the branch tip's SHA and write it into `commit` (keeping `branch` as the tracking intent). For GitHub entries without an explicit `branch`, pin discovers the repo's default branch via the GitHub API and writes both `branch` and `commit` back, so subsequent runs can refresh. Bare-string source URLs are rewritten to the explicit object form. |
-| `conduit update [options]` | Alias of `pin`; refresh-flavoured verb. |
+| `conduit pin [options]` | Lock every GitHub / AzDO entry to a specific commit SHA by rewriting its source to the URL-native pinned form (GitHub: `tree/<sha>/<path>`; AzDO: `?version=GC<sha>`). For entries without an explicit branch, pin discovers the repo's default branch via the API. Already-pinned entries are skipped with a pointer at `conduit unpin`. |
+| `conduit update [options]` | Alias of `pin`. Lock each unpinned entry to the latest commit on its tracked branch (or the repo's default branch when none is set). |
+| `conduit unpin [options]` | Restore branch tracking on pinned entries by rewriting `tree/<sha>/<path>` back to `tree/<branch>/<path>` (GitHub) or `?version=GC<sha>` back to `?version=GB<branch>` (AzDO). `--to <branch>` picks the branch literally; without it, Conduit queries the repo's default branch and falls back to `main` if discovery fails. |
 | `conduit watch [options]` | Run an initial sync, then re-sync whenever the manifest changes on disk. Ctrl+C to stop. |
 
 ### `conduit sync` options

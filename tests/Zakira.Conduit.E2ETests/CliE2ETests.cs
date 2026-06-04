@@ -580,12 +580,14 @@ public sealed class CliE2ETests
 
         var written = await File.ReadAllTextAsync(manifestPath);
         using var doc = System.Text.Json.JsonDocument.Parse(written);
-        var entry = doc.RootElement.GetProperty("entries")[0];
-        entry.GetProperty("source").GetProperty("commit").GetString().Should().Be(sha);
-        // The branch should be retained as the tracking intent.
-        entry.GetProperty("source").GetProperty("branch").GetString().Should().Be("main");
+        var source = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
+        source.GetProperty("commit").GetString().Should().Be(sha,
+            because: "pin should record the resolved SHA in 'commit'");
+        source.TryGetProperty("branch", out _).Should().BeFalse(
+            because: "pin is URL-native: it removes 'branch' so the entry is unambiguously locked to a commit. Run 'conduit unpin' to thaw.");
         // Other top-level fields on the entry must survive the rewrite.
-        entry.GetProperty("description").GetString().Should().Be("An entry that should keep its description");
+        doc.RootElement.GetProperty("entries")[0]
+            .GetProperty("description").GetString().Should().Be("An entry that should keep its description");
 
         // A backup of the original manifest must have been written.
         var backupPath = manifestPath + ".bak";
@@ -698,20 +700,20 @@ public sealed class CliE2ETests
 
         var written = await File.ReadAllTextAsync(manifestPath);
         using var doc = System.Text.Json.JsonDocument.Parse(written);
-        var entry = doc.RootElement.GetProperty("entries")[0];
-        entry.GetProperty("source").GetProperty("branch").GetString().Should().Be("main",
-            because: "the discovered default branch should be written back so future pins can refresh");
-        entry.GetProperty("source").GetProperty("commit").GetString().Should().Be(sha);
+        var source = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
+        source.GetProperty("commit").GetString().Should().Be(sha,
+            because: "the discovered default branch resolves to a SHA which is then recorded");
+        source.TryGetProperty("branch", out _).Should().BeFalse(
+            because: "URL-native pin removes 'branch'; future refresh must go through 'conduit unpin'");
     }
 
     [Fact]
-    public async Task pin_converts_bare_string_github_source_to_object_form_when_pinning()
+    public async Task pin_rewrites_bare_string_github_source_to_tree_sha_url()
     {
         using var tmp = new TempDir();
         await using var server = new MockGitHubServer();
         const string sha = "abcdef0123456789abcdef0123456789abcdef01";
 
-        // More-specific route registered first (same reason as above).
         server.Map("/repos/acme/skills/commits/main", async ctx =>
         {
             ctx.Response.StatusCode = 200;
@@ -744,13 +746,127 @@ public sealed class CliE2ETests
         var written = await File.ReadAllTextAsync(manifestPath);
         using var doc = System.Text.Json.JsonDocument.Parse(written);
         var src = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
-        src.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object,
-            because: "pinning a bare-string source rewrites it as an explicit object so branch+commit can be attached");
-        src.GetProperty("type").GetString().Should().Be("github");
-        src.GetProperty("repo").GetString().Should().Be("acme/skills");
-        src.GetProperty("path").GetString().Should().Be("sub-path");
-        src.GetProperty("branch").GetString().Should().Be("main");
-        src.GetProperty("commit").GetString().Should().Be(sha);
+        src.ValueKind.Should().Be(System.Text.Json.JsonValueKind.String,
+            because: "URL-native pin keeps a string source as a string, just upgrading the URL.");
+        src.GetString().Should().Be($"https://github.com/acme/skills/tree/{sha}/sub-path");
+    }
+
+    [Fact]
+    public async Task pin_rewrites_array_element_github_source_in_place()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+        const string sha = "abcdef0123456789abcdef0123456789abcdef01";
+
+        server.Map("/repos/acme/skills/commits/main", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes($"{{\"sha\":\"{sha}\"}}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+        server.Map("/repos/acme/skills", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes("{\"default_branch\":\"main\"}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, """
+            { "version": 1, "entries": [ { "source": [ "https://github.com/acme/skills/sub" ], "targets": ["./out"] } ] }
+            """);
+
+        var env = new Dictionary<string, string?> { ["CONDUIT_GITHUB_API_BASE"] = server.BaseAddress.ToString() };
+        var result = await ConduitCli.RunAsync(["pin", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        var written = await File.ReadAllTextAsync(manifestPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(written);
+        var arr = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
+        arr.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Array,
+            because: "the array shape is preserved; only the element URL is rewritten");
+        arr[0].GetString().Should().Be($"https://github.com/acme/skills/tree/{sha}/sub");
+    }
+
+    [Fact]
+    public async Task pin_skips_entries_already_pinned_with_a_pointer_at_unpin()
+    {
+        using var tmp = new TempDir();
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, """
+            { "version": 1, "entries": [ { "name": "demo", "source": { "type": "github", "repo": "acme/skills", "commit": "abcdef0123456789abcdef0123456789abcdef01" }, "targets": ["./out"] } ] }
+            """);
+
+        var result = await ConduitCli.RunAsync(["pin", "--manifest", manifestPath]);
+
+        result.ExitCode.Should().Be(0);
+        result.StdOut.Should().Contain("already pinned");
+        result.StdOut.Should().Contain("conduit unpin");
+    }
+
+    [Fact]
+    public async Task unpin_restores_branch_on_object_source_with_default_main_fallback()
+    {
+        using var tmp = new TempDir();
+        // No mock server - default-branch discovery will fail and fall back to "main".
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, """
+            { "version": 1, "entries": [ { "name": "demo", "source": { "type": "github", "repo": "acme/skills", "commit": "abcdef0123456789abcdef0123456789abcdef01" }, "targets": ["./out"] } ] }
+            """);
+
+        // Point at an unroutable host so discovery fails quickly.
+        var env = new Dictionary<string, string?> { ["CONDUIT_GITHUB_API_BASE"] = "http://127.0.0.1:1/" };
+        var result = await ConduitCli.RunAsync(["unpin", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        var written = await File.ReadAllTextAsync(manifestPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(written);
+        var source = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
+        source.GetProperty("branch").GetString().Should().Be("main",
+            because: "no --to flag and discovery failed; fall back to literal 'main'.");
+        source.TryGetProperty("commit", out _).Should().BeFalse("commit is removed when unpinning");
+    }
+
+    [Fact]
+    public async Task unpin_explicit_to_branch_skips_discovery()
+    {
+        using var tmp = new TempDir();
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, """
+            { "version": 1, "entries": [ { "name": "demo", "source": "https://github.com/acme/skills/tree/abcdef0123456789abcdef0123456789abcdef01/sub", "targets": ["./out"] } ] }
+            """);
+
+        var result = await ConduitCli.RunAsync(["unpin", "--manifest", manifestPath, "--to", "develop"]);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        var written = await File.ReadAllTextAsync(manifestPath);
+        using var doc = System.Text.Json.JsonDocument.Parse(written);
+        var src = doc.RootElement.GetProperty("entries")[0].GetProperty("source");
+        src.GetString().Should().Be("https://github.com/acme/skills/tree/develop/sub");
+    }
+
+    [Fact]
+    public async Task unpin_skips_entries_that_are_not_pinned()
+    {
+        using var tmp = new TempDir();
+        var manifestPath = tmp.Combine("conduit.json");
+        await File.WriteAllTextAsync(manifestPath, """
+            { "version": 1, "entries": [ { "name": "demo", "source": { "type": "github", "repo": "acme/skills", "branch": "main" }, "targets": ["./out"] } ] }
+            """);
+
+        var result = await ConduitCli.RunAsync(["unpin", "--manifest", manifestPath]);
+
+        result.ExitCode.Should().Be(0);
+        result.StdOut.Should().Contain("not pinned");
     }
 
     [Fact]

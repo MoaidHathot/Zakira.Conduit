@@ -34,15 +34,16 @@ public sealed class GitHubSourceInferrer : ISourceInferrer
         ArgumentNullException.ThrowIfNull(source);
         RejectAzdoOnlyFields(source);
 
-        if (!GitHubRepoReference.TryParseExtended(source.Uri, out var owner, out var name, out var urlSubPath, out var urlBranch, out var error))
+        if (!GitHubRepoReference.TryParseExtended(source.Uri, out var owner, out var name, out var urlSubPath, out var urlBranch, out var urlCommit, out var error))
         {
             throw new SourceInferenceException($"uri '{source.Uri}' could not be parsed as a GitHub repository: {error}");
         }
 
-        // Merge URL-derived sub-path / branch with explicit overrides on the
-        // UriBasedSource. Explicit overrides win when set; otherwise the
-        // URL-derived values are used. Setting both an explicit 'path' and
-        // having a URL sub-path is an error (the user is contradicting themself).
+        // Merge URL-derived sub-path / branch / commit with explicit overrides
+        // on the UriBasedSource. Explicit overrides win when set; otherwise
+        // the URL-derived values are used. Setting both an explicit 'path'
+        // and having a URL sub-path is an error (the user is contradicting
+        // themself). Same goes for branch and commit.
         var hasExplicitPath = !string.IsNullOrWhiteSpace(source.Path) || source.Paths is { Count: > 0 };
         if (urlSubPath is not null && hasExplicitPath)
         {
@@ -57,6 +58,13 @@ public sealed class GitHubSourceInferrer : ISourceInferrer
                 $"uri '{source.Uri}' carries branch '{urlBranch}' but the source also sets branch='{source.Branch}'. Use one or the other.");
         }
 
+        var hasExplicitCommit = !string.IsNullOrWhiteSpace(source.Commit);
+        if (urlCommit is not null && hasExplicitCommit && !string.Equals(urlCommit, source.Commit, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SourceInferenceException(
+                $"uri '{source.Uri}' pins commit '{urlCommit}' but the source also sets commit='{source.Commit}'. Use one or the other.");
+        }
+
         return new GitHubSource
         {
             // Use the canonical owner/repo slug so downstream URL parsing
@@ -65,7 +73,7 @@ public sealed class GitHubSourceInferrer : ISourceInferrer
             Path = source.Path ?? urlSubPath,
             Paths = source.Paths,
             Branch = source.Branch ?? urlBranch,
-            Commit = source.Commit,
+            Commit = source.Commit ?? urlCommit,
             Include = source.Include,
             Exclude = source.Exclude,
             Auth = source.Auth,

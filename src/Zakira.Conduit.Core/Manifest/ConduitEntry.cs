@@ -86,4 +86,23 @@ public sealed record ConduitEntry
     public string ResolvedName => Name
         ?? throw new InvalidOperationException(
             "ConduitEntry.Name is not resolved. The inference coordinator must run on the manifest before downstream code reads ResolvedName.");
+
+    /// <summary>
+    ///     Index of the on-disk entry this in-memory entry came from. For
+    ///     array-expanded sub-entries, this is the index of the
+    ///     <i>parent</i> on-disk entry that carried the array. Populated by
+    ///     <see cref="Sources.Inference.SourceInferenceCoordinator"/>; used
+    ///     by <c>conduit pin</c> / <c>conduit unpin</c> to address the exact
+    ///     spot in the manifest file for surgical rewrites.
+    /// </summary>
+    [JsonIgnore]
+    public int? OriginalDiskEntryIndex { get; init; }
+
+    /// <summary>
+    ///     For an entry expanded from an array source, the index of this
+    ///     element within the parent entry's <c>source</c> array.
+    ///     <see langword="null"/> for non-array entries.
+    /// </summary>
+    [JsonIgnore]
+    public int? OriginalArrayElementIndex { get; init; }
 }

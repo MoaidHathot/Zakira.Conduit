@@ -136,6 +136,55 @@ public sealed class AzdoRefResolver : IAzdoRefResolver
             HttpStatusCode.OK);
     }
 
+    /// <inheritdoc />
+    public async Task<string> GetDefaultBranchAsync(AzdoSource source, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        var components = source.ResolvedComponents;
+        var path = $"{Uri.EscapeDataString(components.Organization)}/{Uri.EscapeDataString(components.Project)}/_apis/git/repositories/{Uri.EscapeDataString(components.Repo)}?api-version={_options.ApiVersion}";
+        var requestUri = new Uri(components.BaseUrl, path);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.UserAgent.ParseAdd(_options.UserAgent);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Authorization = await _credentials.TryGetAsync(source, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogDebug("GET {Uri} (default-branch lookup)", requestUri);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            throw new AzdoApiException(
+                $"Azure DevOps returned {(int)response.StatusCode} {response.StatusCode} when looking up the default branch for '{source.Slug}'.{(string.IsNullOrEmpty(body) ? string.Empty : " Body: " + body)}",
+                response.StatusCode);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (!doc.RootElement.TryGetProperty("defaultBranch", out var element) || element.ValueKind != JsonValueKind.String)
+        {
+            throw new AzdoApiException(
+                $"Azure DevOps response for '{source.Slug}' did not include a 'defaultBranch' field.",
+                HttpStatusCode.OK);
+        }
+
+        var raw = element.GetString();
+        if (string.IsNullOrEmpty(raw))
+        {
+            throw new AzdoApiException(
+                $"Azure DevOps returned an empty default branch for '{source.Slug}'.",
+                HttpStatusCode.OK);
+        }
+
+        // AzDO returns the canonical ref form ("refs/heads/main"); strip the
+        // prefix so callers get just the branch name.
+        const string headsPrefix = "refs/heads/";
+        return raw.StartsWith(headsPrefix, StringComparison.OrdinalIgnoreCase) ? raw[headsPrefix.Length..] : raw;
+    }
+
     private static async Task<string> SafeReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try

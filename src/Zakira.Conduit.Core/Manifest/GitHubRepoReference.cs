@@ -31,22 +31,31 @@ public static class GitHubRepoReference
     ///     <see langword="true"/> when <paramref name="value"/> parsed cleanly.
     /// </summary>
     public static bool TryParse(string? value, out string owner, out string name, out string error) =>
-        TryParseExtended(value, out owner, out name, out _, out _, out error, allowExtraPath: false);
+        TryParseExtended(value, out owner, out name, out _, out _, out _, out error, allowExtraPath: false);
 
     /// <summary>
     ///     Like <see cref="TryParse(string?, out string, out string, out string)"/> but
     ///     additionally accepts and surfaces extra path segments after the
-    ///     repository name, splitting them into <paramref name="subPath"/>
-    ///     and (optionally) <paramref name="branch"/>:
+    ///     repository name, splitting them into <paramref name="subPath"/>,
+    ///     <paramref name="branch"/>, and <paramref name="commit"/>:
     ///     <list type="bullet">
-    ///         <item><description><c>owner/repo/some/sub/path</c>            -> subPath=<c>some/sub/path</c></description></item>
-    ///         <item><description><c>owner/repo/tree/main/some/path</c>      -> branch=<c>main</c>, subPath=<c>some/path</c></description></item>
-    ///         <item><description><c>owner/repo/blob/main/file.md</c>        -> branch=<c>main</c>, subPath=<c>file.md</c></description></item>
+    ///         <item><description><c>owner/repo/some/sub/path</c>                                -> subPath=<c>some/sub/path</c></description></item>
+    ///         <item><description><c>owner/repo/tree/main/some/path</c>                          -> branch=<c>main</c>, subPath=<c>some/path</c></description></item>
+    ///         <item><description><c>owner/repo/tree/abcdef..40hex../some/path</c>               -> commit=<c>abcdef..</c>, subPath=<c>some/path</c></description></item>
+    ///         <item><description><c>owner/repo/blob/main/file.md</c>                            -> branch=<c>main</c>, subPath=<c>file.md</c></description></item>
     ///     </list>
     ///     <para>
     ///         When <paramref name="allowExtraPath"/> is <see langword="false"/>
     ///         (the default of <see cref="TryParse(string?, out string, out string, out string)"/>)
     ///         the legacy strict behaviour applies and any extra segment is an error.
+    ///     </para>
+    ///     <para>
+    ///         The <c>tree</c>/<c>blob</c>/<c>raw</c> ref is routed to
+    ///         <paramref name="commit"/> when it is a full 40-character hex
+    ///         string (a SHA), and to <paramref name="branch"/> otherwise.
+    ///         Short SHAs (7&#8211;39 hex chars) are treated as branches
+    ///         because a hex-shaped branch name is possible and ambiguity is
+    ///         unwelcome; <c>conduit pin</c> always writes full 40-char SHAs.
     ///     </para>
     /// </summary>
     public static bool TryParseExtended(
@@ -55,6 +64,7 @@ public static class GitHubRepoReference
         out string name,
         out string? subPath,
         out string? branch,
+        out string? commit,
         out string error,
         bool allowExtraPath = true)
     {
@@ -62,6 +72,7 @@ public static class GitHubRepoReference
         name = string.Empty;
         subPath = null;
         branch = null;
+        commit = null;
         error = string.Empty;
 
         if (string.IsNullOrWhiteSpace(value))
@@ -136,10 +147,22 @@ public static class GitHubRepoReference
             //   tree/<ref>/<path...>
             //   blob/<ref>/<path...>  (single file)
             //   raw/<ref>/<path...>
+            // The ref is classified as a commit when it's a full 40-char hex
+            // SHA, and as a branch otherwise (short SHAs go to branch to
+            // avoid mis-classifying hex-shaped branch names; pin always
+            // writes 40-char SHAs).
             var segments = remainder.Split('/');
             if (segments.Length >= 2 && segments[0] is "tree" or "blob" or "raw")
             {
-                branch = segments[1];
+                var refValue = segments[1];
+                if (LooksLikeFullSha(refValue))
+                {
+                    commit = refValue;
+                }
+                else
+                {
+                    branch = refValue;
+                }
                 subPath = segments.Length > 2 ? string.Join('/', segments, 2, segments.Length - 2) : null;
             }
             else
@@ -160,6 +183,32 @@ public static class GitHubRepoReference
 
     private static string StripPrefix(string value, string prefix) =>
         value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? value[prefix.Length..] : value;
+
+    /// <summary>
+    ///     Returns <see langword="true"/> when <paramref name="value"/> is a
+    ///     40-character hex string &mdash; the shape of a full git commit
+    ///     SHA. Short SHAs are intentionally rejected here to avoid
+    ///     mis-classifying hex-shaped branch names; <c>conduit pin</c> writes
+    ///     full SHAs so this is the canonical pinned form.
+    /// </summary>
+    public static bool LooksLikeFullSha(string? value)
+    {
+        if (value is null || value.Length != 40)
+        {
+            return false;
+        }
+
+        foreach (var c in value)
+        {
+            var isHex = c is (>= '0' and <= '9') or (>= 'a' and <= 'f') or (>= 'A' and <= 'F');
+            if (!isHex)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static bool IsValidNamePart(string s)
     {

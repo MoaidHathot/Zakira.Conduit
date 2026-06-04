@@ -88,6 +88,8 @@ public sealed class SourceInferenceCoordinator
             {
                 Source = concrete,
                 Name = resolvedName,
+                OriginalDiskEntryIndex = i,
+                OriginalArrayElementIndex = null,
             });
         }
 
@@ -155,6 +157,8 @@ public sealed class SourceInferenceCoordinator
                 Disabled = entry.Disabled,
                 Source = concreteElement,
                 Targets = entry.Targets,
+                OriginalDiskEntryIndex = index,
+                OriginalArrayElementIndex = j,
             });
         }
     }
