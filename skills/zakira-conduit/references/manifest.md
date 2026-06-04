@@ -2,6 +2,13 @@
 
 Every field accepted by a `conduit.json` manifest. The runtime validator (`ManifestValidator`) and the JSON Schema at `schemas/conduit.schema.json` are the authoritative specs; this document mirrors them in prose.
 
+## File format and discovery
+
+- **File name**: `conduit.json` (preferred) or `conduit.jsonc` (editor-hint alias). Both are probed at every discovery location; `.json` wins when both exist.
+- **Format**: JSONC. Line comments (`// ...`), block comments (`/* ... */`), and trailing commas are accepted regardless of file extension.
+- **Discovery order** (when `--manifest` is not supplied): `$XDG_CONFIG_HOME/Zakira.Conduit/conduit.{json,jsonc}` -> `$HOME/.config/Zakira.Conduit/conduit.{json,jsonc}` -> `./conduit.{json,jsonc}`.
+- **Round-trip trivia**: `conduit pin` / `unpin` / `update` preserve comments and trailing commas when every touched entry has a string-shaped source on disk (URL rewrite). When an object-shaped source needs key insertion/removal (e.g. dropping `branch` on pin), the write falls back to a full reformat that loses trivia.
+
 ## Top-level object
 
 ```jsonc

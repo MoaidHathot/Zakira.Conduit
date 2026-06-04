@@ -38,7 +38,10 @@ public sealed class DefaultManifestLocator : IManifestLocator
     /// <inheritdoc />
     public IReadOnlyList<string> EnumerateCandidates(string? explicitPath)
     {
-        var list = new List<string>(capacity: 3);
+        // Each location contributes both file-name variants ('conduit.json'
+        // then 'conduit.jsonc'); the .json form is preferred so users who
+        // have both never get a surprise.
+        var list = new List<string>(capacity: 6);
 
         if (!string.IsNullOrWhiteSpace(explicitPath))
         {
@@ -57,16 +60,25 @@ public sealed class DefaultManifestLocator : IManifestLocator
         var xdg = _environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         if (!string.IsNullOrWhiteSpace(xdg))
         {
-            list.Add(Path.Combine(xdg, ManifestNames.ConfigDirectoryName, ManifestNames.DefaultFileName));
+            foreach (var file in ManifestNames.AllFileNames)
+            {
+                list.Add(Path.Combine(xdg, ManifestNames.ConfigDirectoryName, file));
+            }
         }
 
         var home = _environment.GetHomeDirectory();
         if (!string.IsNullOrWhiteSpace(home))
         {
-            list.Add(Path.Combine(home, ".config", ManifestNames.ConfigDirectoryName, ManifestNames.DefaultFileName));
+            foreach (var file in ManifestNames.AllFileNames)
+            {
+                list.Add(Path.Combine(home, ".config", ManifestNames.ConfigDirectoryName, file));
+            }
         }
 
-        list.Add(Path.Combine(_environment.GetCurrentDirectory(), ManifestNames.DefaultFileName));
+        foreach (var file in ManifestNames.AllFileNames)
+        {
+            list.Add(Path.Combine(_environment.GetCurrentDirectory(), file));
+        }
 
         return list;
     }

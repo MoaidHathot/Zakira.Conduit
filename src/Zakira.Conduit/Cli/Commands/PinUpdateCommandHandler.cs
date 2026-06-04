@@ -274,11 +274,28 @@ internal sealed class PinUpdateCommandHandler
 
     private async Task<string?> ApplyUpdatesAsync(string manifestPath, List<PinUpdate> updates, CancellationToken cancellationToken)
     {
-        // RewriteAsync handles both object and string sources, and supports
-        // patching deep into arrays. The trade-off vs the surgical JSONC
-        // patcher: we lose comments and trailing commas. Tracked under C4 as
-        // a known limitation when keys need to be added/removed (which pin
-        // does, by dropping 'branch' from object sources).
+        // Fast path: if every update only needs a string-leaf replacement
+        // (the on-disk source is already a string we'll rewrite into a new
+        // string URL), we route through the surgical JSONC patcher which
+        // preserves comments, trailing commas, blank lines, and indentation.
+        // For object-shaped sources we still need to delete the 'branch' key,
+        // which the patcher can't do, so we fall back to the full RewriteAsync.
+        var stringEdits = TryBuildStringLeafEdits(manifestPath, updates);
+        if (stringEdits is not null)
+        {
+            var (patched, surgicalBackup) = await _writer.ReplaceStringLeavesAsync(manifestPath, stringEdits, cancellationToken).ConfigureAwait(false);
+            if (patched)
+            {
+                return surgicalBackup;
+            }
+            // Patcher refused (unexpected after the shape check); fall through.
+        }
+
+        // RewriteAsync: handles object/string/array shapes via the full JsonNode
+        // model. The trade-off vs the surgical patcher: comments and trailing
+        // commas in the source file are lost on re-emit, because System.Text.Json
+        // doesn't preserve trivia. This kicks in only when at least one entry
+        // needs an object-key mutation (e.g. dropping 'branch' on pin).
         return await _writer.RewriteAsync(manifestPath, root =>
         {
             if (root["entries"] is not JsonArray entriesArray)
@@ -507,6 +524,133 @@ internal sealed class PinUpdateCommandHandler
 
     private static string Shorten(string sha) =>
         string.IsNullOrEmpty(sha) || sha.Length <= 12 ? sha : sha[..12];
+
+    /// <summary>
+    ///     Inspects the on-disk manifest and, if every update targets a
+    ///     string-leaf source (top-level scalar or array element), returns a
+    ///     list of <see cref="JsonValuePatcher.StringEdit"/>s the trivia-
+    ///     preserving surgical patcher can apply. Returns <see langword="null"/>
+    ///     when at least one update needs an object-key mutation (which the
+    ///     patcher can't do) or when the manifest shape doesn't line up.
+    /// </summary>
+    private List<JsonValuePatcher.StringEdit>? TryBuildStringLeafEdits(string manifestPath, List<PinUpdate> updates)
+    {
+        Dictionary<(int Entry, int? Element), JsonValueKind>? shapes;
+        try
+        {
+            shapes = MapDiskSourceShapes(manifestPath);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            _logger.LogDebug(ex, "Could not pre-map disk source shapes; falling back to full rewrite.");
+            return null;
+        }
+
+        if (shapes is null)
+        {
+            return null;
+        }
+
+        var edits = new List<JsonValuePatcher.StringEdit>(updates.Count);
+        foreach (var u in updates)
+        {
+            if (!shapes.TryGetValue((u.DiskEntryIndex, u.ArrayElementIndex), out var kind) || kind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var newValue = u.Kind switch
+            {
+                SourceKind.GitHub => BuildPinnedGitHubUrl(string.Empty, u),
+                SourceKind.Azdo => BuildPinnedAzdoUrl(string.Empty, u),
+                _ => null,
+            };
+
+            if (newValue is null)
+            {
+                return null;
+            }
+
+            edits.Add(new JsonValuePatcher.StringEdit(
+                Path: BuildDiskJsonPath(u.DiskEntryIndex, u.ArrayElementIndex),
+                NewValue: newValue));
+        }
+
+        return edits;
+    }
+
+    /// <summary>
+    ///     Walks the on-disk manifest once and records, per (entry-index,
+    ///     array-element-index) the <see cref="JsonValueKind"/> of the
+    ///     <c>source</c> at that position. Used by the patcher fast-path to
+    ///     decide whether each update can be applied as a leaf replacement.
+    /// </summary>
+    private static Dictionary<(int Entry, int? Element), JsonValueKind>? MapDiskSourceShapes(string manifestPath)
+    {
+        var raw = File.ReadAllText(manifestPath);
+        var node = JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+
+        if (node is not JsonObject root || root["entries"] is not JsonArray entries)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<(int Entry, int? Element), JsonValueKind>();
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i] is not JsonObject entryObj)
+            {
+                continue;
+            }
+
+            var sourceNode = entryObj["source"];
+            switch (sourceNode)
+            {
+                case JsonValue val:
+                    map[(i, null)] = val.GetValueKind();
+                    break;
+
+                case JsonObject:
+                    map[(i, null)] = JsonValueKind.Object;
+                    break;
+
+                case JsonArray arr:
+                    for (var j = 0; j < arr.Count; j++)
+                    {
+                        var element = arr[j];
+                        switch (element)
+                        {
+                            case JsonValue elemVal:
+                                map[(i, j)] = elemVal.GetValueKind();
+                                break;
+                            case JsonObject:
+                                map[(i, j)] = JsonValueKind.Object;
+                                break;
+                            default:
+                                map[(i, j)] = JsonValueKind.Null;
+                                break;
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>
+    ///     Returns the dotted JSON-pointer-ish path used by
+    ///     <see cref="JsonValuePatcher"/>: <c>entries[N].source</c> for
+    ///     top-level sources, <c>entries[N].source[M]</c> for array elements.
+    /// </summary>
+    internal static string BuildDiskJsonPath(int diskEntryIndex, int? arrayElementIndex) =>
+        arrayElementIndex is { } j
+            ? $"entries[{diskEntryIndex}].source[{j}]"
+            : $"entries[{diskEntryIndex}].source";
 
     /// <summary>One queued pin write-back for a single entry.</summary>
     internal sealed record PinUpdate(

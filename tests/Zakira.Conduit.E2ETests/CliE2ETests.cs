@@ -870,6 +870,65 @@ public sealed class CliE2ETests
     }
 
     [Fact]
+    public async Task pin_preserves_jsonc_comments_and_trailing_commas_on_string_array_sources()
+    {
+        using var tmp = new TempDir();
+        await using var server = new MockGitHubServer();
+        const string sha = "abcdef0123456789abcdef0123456789abcdef01";
+
+        server.Map("/repos/acme/skills/commits/main", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes($"{{\"sha\":\"{sha}\"}}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+        server.Map("/repos/acme/skills", async ctx =>
+        {
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var body = System.Text.Encoding.UTF8.GetBytes("{\"default_branch\":\"main\"}");
+            ctx.Response.ContentLength64 = body.LongLength;
+            await ctx.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
+            ctx.Response.Close();
+        });
+
+        var manifestPath = tmp.Combine("conduit.jsonc");
+        const string original = """
+            // Top-level comment that must survive pin.
+            {
+              "version": 1,
+              "entries": [
+                {
+                  // bundle of skills
+                  "source": [
+                    "https://github.com/acme/skills/sub", // inline kept
+                  ],
+                  "targets": [ "./out", ], /* trailing commas everywhere */
+                },
+              ]
+            }
+            """;
+        await File.WriteAllTextAsync(manifestPath, original);
+
+        var env = new Dictionary<string, string?> { ["CONDUIT_GITHUB_API_BASE"] = server.BaseAddress.ToString() };
+        var result = await ConduitCli.RunAsync(["pin", "--manifest", manifestPath], environmentOverrides: env);
+
+        result.ExitCode.Should().Be(0, because: $"stdout:\n{result.StdOut}\nstderr:\n{result.StdErr}");
+
+        var written = await File.ReadAllTextAsync(manifestPath);
+        written.Should().Contain("Top-level comment that must survive pin.",
+            because: "the surgical JSONC patcher preserves comments outside the patched string leaves.");
+        written.Should().Contain("// bundle of skills");
+        written.Should().Contain("// inline kept");
+        written.Should().Contain("/* trailing commas everywhere */");
+        written.Should().Contain($"https://github.com/acme/skills/tree/{sha}/sub",
+            because: "the array element URL was rewritten in place.");
+    }
+
+    [Fact]
     public async Task watch_runs_initial_sync_then_resyncs_when_manifest_changes()
     {
         using var tmp = new TempDir();

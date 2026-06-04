@@ -485,13 +485,53 @@ the arrow form is terser for single-line array elements.
 
 ### Manifest discovery
 
-When `--manifest` / `-m` is **not** provided, `conduit` looks (in order) at:
+When `--manifest` / `-m` is **not** provided, `conduit` probes each of the
+following locations in order, preferring `conduit.json` over `conduit.jsonc`
+at each location:
 
-1. `$XDG_CONFIG_HOME/Zakira.Conduit/conduit.json`
-2. `$HOME/.config/Zakira.Conduit/conduit.json` *(XDG-style fallback)*
-3. `./conduit.json` *(current working directory)*
+1. `$XDG_CONFIG_HOME/Zakira.Conduit/conduit.{json,jsonc}`
+2. `$HOME/.config/Zakira.Conduit/conduit.{json,jsonc}` *(XDG-style fallback)*
+3. `./conduit.{json,jsonc}` *(current working directory)*
 
-The first one that exists wins. The same XDG-style resolution is used on every operating system &mdash; including Windows &mdash; so the rules are identical for everyone collaborating on the same manifest.
+The first existing file wins. The same XDG-style resolution is used on every
+operating system &mdash; including Windows &mdash; so the rules are identical
+for everyone collaborating on the same manifest.
+
+### JSONC support (comments and trailing commas)
+
+The manifest is parsed as JSONC: line comments (`// ...`), block comments
+(`/* ... */`), and trailing commas are all accepted regardless of file
+extension. The `.jsonc` extension is recognised purely as an editor hint
+(VS Code and many other editors switch to a JSONC mode when the file ends
+in `.jsonc`); functionally `conduit.json` and `conduit.jsonc` are
+interchangeable.
+
+```jsonc
+// agents/skills mirror — last reviewed 2025-Q2.
+{
+  "version": 1,
+  "entries": [
+    {
+      // Bundle pinned at the Q2 cut.
+      "source": [
+        "https://github.com/MoaidHathot/ActionView/skills",
+        "https://github.com/MoaidHathot/PowerReview/skills",
+      ],
+      "targets": [
+        "$XDG_CONFIG_HOME/Orchestra/workspace/skills",
+      ]
+    },
+  ]
+}
+```
+
+`conduit pin` / `conduit unpin` / `conduit update` preserve comments and
+trailing commas **when every entry they touch has a string-shaped source
+on disk** (URL rewrite, leaf-level edit only). When an entry has an
+object-shaped source that requires inserting or removing a key
+(e.g. dropping `branch` on pin of `{type:"github", repo, branch}`), the
+write falls back to a full reformat which currently loses trivia &mdash;
+this is a known limitation of `System.Text.Json` and is tracked in code.
 
 ---
 

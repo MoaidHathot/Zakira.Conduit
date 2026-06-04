@@ -75,7 +75,39 @@ public sealed class DefaultManifestLocatorTests
 
         var candidates = locator.EnumerateCandidates(explicitPath: null);
 
-        candidates[^1].Should().Be(Path.Combine(env.CurrentDirectory, "conduit.json"));
+        // The cwd contributes the LAST pair of candidates: conduit.json
+        // (preferred) followed by conduit.jsonc (alt extension).
+        candidates[^2].Should().Be(Path.Combine(env.CurrentDirectory, "conduit.json"));
+        candidates[^1].Should().Be(Path.Combine(env.CurrentDirectory, "conduit.jsonc"));
+    }
+
+    [Fact]
+    public void Both_json_and_jsonc_extensions_are_probed_at_every_location()
+    {
+        var env = new FakeEnvironment
+        {
+            CurrentDirectory = OperatingSystem.IsWindows() ? @"C:\work" : "/work",
+            HomeDirectory = OperatingSystem.IsWindows() ? @"C:\Users\fake" : "/home/fake",
+        };
+        env.Set("XDG_CONFIG_HOME", OperatingSystem.IsWindows() ? @"C:\xdg" : "/xdg");
+        var locator = new DefaultManifestLocator(env);
+
+        var candidates = locator.EnumerateCandidates(explicitPath: null);
+
+        candidates.Should().Contain(c => c.EndsWith("conduit.json", StringComparison.Ordinal));
+        candidates.Should().Contain(c => c.EndsWith("conduit.jsonc", StringComparison.Ordinal));
+        // .json variant precedes its .jsonc sibling at every location.
+        for (var i = 0; i < candidates.Count - 1; i++)
+        {
+            if (candidates[i].EndsWith("conduit.json", StringComparison.Ordinal) &&
+                candidates[i + 1].EndsWith("conduit.jsonc", StringComparison.Ordinal))
+            {
+                // adjacent pair as expected
+                var dirA = Path.GetDirectoryName(candidates[i]);
+                var dirB = Path.GetDirectoryName(candidates[i + 1]);
+                dirA.Should().Be(dirB);
+            }
+        }
     }
 
     [Fact]

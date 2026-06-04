@@ -114,32 +114,162 @@ internal sealed class UnpinCommandHandler
         string? backupPath = null;
         if (rewrites.Count > 0 && !dryRun)
         {
-            backupPath = await _writer.RewriteAsync(manifestPath, root =>
+            // Fast path: when every rewrite targets a string-leaf source, route
+            // through the surgical JSONC patcher so comments / trailing commas
+            // survive. Object-source unpin needs to delete the 'commit' key,
+            // which the patcher can't do, so we fall back to RewriteAsync.
+            var stringEdits = TryBuildStringLeafEdits(manifestPath, rewrites);
+            if (stringEdits is not null)
             {
-                if (root["entries"] is not JsonArray entriesArray)
+                var (patched, surgicalBackup) = await _writer.ReplaceStringLeavesAsync(manifestPath, stringEdits, cancellationToken).ConfigureAwait(false);
+                if (patched)
                 {
-                    return;
+                    backupPath = surgicalBackup;
                 }
-
-                foreach (var u in rewrites)
+                else
                 {
-                    if (u.DiskEntryIndex < 0 || u.DiskEntryIndex >= entriesArray.Count)
+                    stringEdits = null;
+                }
+            }
+
+            if (stringEdits is null)
+            {
+                backupPath = await _writer.RewriteAsync(manifestPath, root =>
+                {
+                    if (root["entries"] is not JsonArray entriesArray)
                     {
-                        continue;
+                        return;
                     }
 
-                    if (entriesArray[u.DiskEntryIndex] is not JsonObject entryObj)
+                    foreach (var u in rewrites)
                     {
-                        continue;
-                    }
+                        if (u.DiskEntryIndex < 0 || u.DiskEntryIndex >= entriesArray.Count)
+                        {
+                            continue;
+                        }
 
-                    ApplyOneUnpin(entryObj, u);
-                }
-            }, cancellationToken).ConfigureAwait(false);
+                        if (entriesArray[u.DiskEntryIndex] is not JsonObject entryObj)
+                        {
+                            continue;
+                        }
+
+                        ApplyOneUnpin(entryObj, u);
+                    }
+                }, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         RenderReport(manifestPath, backupPath, rewrites, skipped, errors, dryRun, output);
         return errors.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    ///     Same shape-check as <see cref="PinUpdateCommandHandler"/>: returns
+    ///     leaf-replacement edits when every rewrite targets a string source
+    ///     on disk, <see langword="null"/> when at least one needs object-key
+    ///     mutation (forcing the full rewrite path).
+    /// </summary>
+    private List<JsonValuePatcher.StringEdit>? TryBuildStringLeafEdits(string manifestPath, List<UnpinRewrite> rewrites)
+    {
+        Dictionary<(int Entry, int? Element), JsonValueKind>? shapes;
+        try
+        {
+            shapes = MapDiskSourceShapes(manifestPath);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            _logger.LogDebug(ex, "Could not pre-map disk source shapes; falling back to full rewrite.");
+            return null;
+        }
+
+        if (shapes is null)
+        {
+            return null;
+        }
+
+        var edits = new List<JsonValuePatcher.StringEdit>(rewrites.Count);
+        foreach (var r in rewrites)
+        {
+            if (!shapes.TryGetValue((r.DiskEntryIndex, r.ArrayElementIndex), out var kind) || kind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var newValue = r.Kind switch
+            {
+                PinUpdateCommandHandler.SourceKind.GitHub => BuildUnpinnedGitHubUrl(string.Empty, r),
+                PinUpdateCommandHandler.SourceKind.Azdo => BuildUnpinnedAzdoUrl(string.Empty, r),
+                _ => null,
+            };
+
+            if (newValue is null)
+            {
+                return null;
+            }
+
+            edits.Add(new JsonValuePatcher.StringEdit(
+                Path: PinUpdateCommandHandler.BuildDiskJsonPath(r.DiskEntryIndex, r.ArrayElementIndex),
+                NewValue: newValue));
+        }
+
+        return edits;
+    }
+
+    private static Dictionary<(int Entry, int? Element), JsonValueKind>? MapDiskSourceShapes(string manifestPath)
+    {
+        var raw = File.ReadAllText(manifestPath);
+        var node = JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+
+        if (node is not JsonObject root || root["entries"] is not JsonArray entries)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<(int Entry, int? Element), JsonValueKind>();
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i] is not JsonObject entryObj)
+            {
+                continue;
+            }
+
+            var sourceNode = entryObj["source"];
+            switch (sourceNode)
+            {
+                case JsonValue val:
+                    map[(i, null)] = val.GetValueKind();
+                    break;
+
+                case JsonObject:
+                    map[(i, null)] = JsonValueKind.Object;
+                    break;
+
+                case JsonArray arr:
+                    for (var j = 0; j < arr.Count; j++)
+                    {
+                        var element = arr[j];
+                        switch (element)
+                        {
+                            case JsonValue elemVal:
+                                map[(i, j)] = elemVal.GetValueKind();
+                                break;
+                            case JsonObject:
+                                map[(i, j)] = JsonValueKind.Object;
+                                break;
+                            default:
+                                map[(i, j)] = JsonValueKind.Null;
+                                break;
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return map;
     }
 
     private async Task UnpinGitHubAsync(
