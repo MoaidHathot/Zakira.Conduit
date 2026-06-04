@@ -28,11 +28,14 @@ If none of those apply, this skill is probably not the right context &mdash; don
 
 A **manifest** (`conduit.json` or `conduit.jsonc`) contains a list of **entries**. Each entry has:
 
-- an optional `name` &mdash; identifier and destination subdirectory name. When omitted, Conduit derives one from the source (GitHub/AzDO repo name, local dir basename).
+- an optional `name` &mdash; identifier and destination subdirectory name (for the default `wrap` strategy). When omitted, Conduit derives one from the source (GitHub/AzDO repo name, local dir basename).
 - one `source` &mdash; either a discriminator-shaped object (`{type: "github" | "azdo" | "local" | "uri", ...}`), a **bare URL string** (which is inferred to the right kind), or an **array** of any of the above (each element becomes its own sub-entry sharing the parent's targets).
 - one or more `targets` &mdash; directories on disk to mirror into.
+- an optional `strategy` &mdash; one of `wrap` (default, places content under `<target>/<name>/`), `flat` (merges content into `<target>/`), `expand` (lifts each top-level child of the source to its own sub-directory), or `skills` (discovers `SKILL.md` folders and fans them out across detected agent harnesses under each target). See `references/manifest.md` "Strategies".
+- optional `groupBy: "source"` &mdash; composes with every strategy to wrap each source's output in a source-named sub-directory.
+- optional `onCollision: error|skip|last-wins` &mdash; controls behaviour when two destinations resolve to the same path.
 
-`conduit sync` walks every enabled entry, fetches the source, and atomically mirrors it into each target's `<entry-name>/` subdirectory. A sibling `.conduit-state.json` records what was synced so the next run can skip unchanged entries (commit-pinned entries skip without network; branch-tracked entries use HTTP `If-None-Match`; local sources use a content fingerprint).
+`conduit sync` walks every enabled entry, fetches the source, dispatches to the entry's strategy to plan one or more `(source, target)` mirror operations, then atomically writes each one. A sibling `.conduit-state.json` records what was synced so the next run can skip unchanged entries (commit-pinned entries skip without network when the strategy is the default `wrap`; branch-tracked entries use HTTP `If-None-Match`; local sources use a content fingerprint).
 
 ## Discovery: where is the manifest?
 
@@ -60,6 +63,8 @@ The manifest is parsed as JSONC: line comments (`// ...`), block comments (`/* .
 | `conduit unpin` | Restore branch tracking on pinned entries. Inverse of `pin`. | "Thaw so I can re-sync against current HEAD." |
 | `conduit clean` | Remove destination directories whose owning entry has been deleted from the manifest. | "Tidy up after I removed entries." |
 | `conduit watch` | Initial sync + re-sync on every manifest change. Ctrl+C to stop. | While editing the manifest iteratively. |
+| `conduit copy <src> <dst>` | One-shot mirror with optional `--strategy`. Bypasses the manifest. | Scripting, ad-hoc installs, strategy previews. |
+| `conduit skills probe <target>` | Scan a target for known agent harness layouts. | "Where would skills go if I targeted this dir?" |
 
 Every command accepts:
 - `-m, --manifest <path>` &mdash; override discovery

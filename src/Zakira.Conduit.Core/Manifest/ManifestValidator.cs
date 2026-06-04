@@ -1,3 +1,5 @@
+using Zakira.Conduit.Strategies;
+
 namespace Zakira.Conduit.Manifest;
 
 /// <summary>
@@ -10,7 +12,28 @@ public static class ManifestValidator
     /// <summary>
     ///     Returns the list of validation errors. Empty when the manifest is valid.
     /// </summary>
-    public static IReadOnlyList<string> Validate(ConduitManifest? manifest)
+    /// <remarks>
+    ///     Overload that does not consult any <see cref="IPlanStrategyRegistry"/>;
+    ///     strategy fields are validated only superficially (shape of the
+    ///     name string). Most callers should use the
+    ///     <see cref="Validate(ConduitManifest?, IPlanStrategyRegistry?)"/>
+    ///     overload so unknown strategies are flagged with the list of
+    ///     registered names.
+    /// </remarks>
+    public static IReadOnlyList<string> Validate(ConduitManifest? manifest) =>
+        Validate(manifest, strategyRegistry: null);
+
+    /// <summary>
+    ///     Returns the list of validation errors. Empty when the manifest is valid.
+    /// </summary>
+    /// <param name="manifest">The manifest to validate.</param>
+    /// <param name="strategyRegistry">
+    ///     Optional registry used to resolve each entry's <c>strategy</c>
+    ///     field. When supplied, unknown strategies become a hard error and
+    ///     each strategy's own
+    ///     <see cref="IPlanStrategy.ValidateEntry"/> is invoked.
+    /// </param>
+    public static IReadOnlyList<string> Validate(ConduitManifest? manifest, IPlanStrategyRegistry? strategyRegistry)
     {
         var errors = new List<string>();
 
@@ -34,21 +57,33 @@ public static class ManifestValidator
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < manifest.Entries.Count; i++)
         {
-            ValidateEntry(manifest.Entries[i], i, seenNames, errors);
+            ValidateEntry(manifest.Entries[i], i, seenNames, strategyRegistry, errors);
         }
 
-        // Cross-entry destination collision: two entries (or two
-        // array-expanded sub-entries) must not produce the same destination
-        // directory inside the same target. Today's per-entry checks only
-        // catch within-entry collisions; this catches the case where two
-        // independent entries pick the same source-derived name (e.g. both
-        // resolve to a repo called "skills") into the same target.
-        ValidateCrossEntryDestinations(manifest, errors);
+        // Cross-entry static destination collisions. When a strategy is
+        // registered, its EnumerateStaticDestinations defines the collision
+        // surface (content-dependent strategies return empty and are
+        // skipped here; their collisions surface at sync time instead).
+        if (strategyRegistry is not null)
+        {
+            ValidateCrossEntryDestinations(manifest, strategyRegistry, errors);
+        }
+        else
+        {
+            // Legacy callers without a registry get the original wrap-only
+            // collision check, preserved verbatim from the pre-strategy code.
+            ValidateLegacyCrossEntryDestinations(manifest, errors);
+        }
 
         return errors;
     }
 
-    private static void ValidateEntry(ConduitEntry entry, int index, HashSet<string> seenNames, List<string> errors)
+    private static void ValidateEntry(
+        ConduitEntry entry,
+        int index,
+        HashSet<string> seenNames,
+        IPlanStrategyRegistry? strategyRegistry,
+        List<string> errors)
     {
         var prefix = $"entries[{index}]";
 
@@ -84,8 +119,12 @@ public static class ManifestValidator
             }
 
             // Per-target `as` aliases only make sense when the entry produces
-            // exactly one content unit; otherwise basename-derived destinations
-            // would silently override the alias.
+            // exactly one content unit AND the chosen strategy honours them.
+            // The wrap strategy is the only one that does in v1; other
+            // strategies emit their own (strategy-specific) error from
+            // IPlanStrategy.ValidateEntry. This check stays here for
+            // legacy/no-registry callers and to keep the original error
+            // message for the multi-path wrap case.
             var aliasedTargets = entry.Targets.Count(t => t is not null && !string.IsNullOrWhiteSpace(t.As));
             var sourceProducesMultiple = entry.Source switch
             {
@@ -95,10 +134,53 @@ public static class ManifestValidator
                 _ => false,
             };
 
-            if (aliasedTargets > 0 && sourceProducesMultiple)
+            if (aliasedTargets > 0 && sourceProducesMultiple && IsLegacyWrapStrategy(entry))
             {
                 errors.Add($"{prefix}.targets: per-target 'as' aliases are not allowed on multi-path entries (the source produces multiple destinations).");
             }
+        }
+
+        // Strategy-level validation.
+        if (entry.Strategy is { } strategyName && !string.IsNullOrWhiteSpace(strategyName))
+        {
+            if (strategyRegistry is not null)
+            {
+                if (!strategyRegistry.IsRegistered(strategyName))
+                {
+                    errors.Add($"{prefix}.strategy '{strategyName}' is not a registered strategy. Available: {string.Join(", ", strategyRegistry.Names)}.");
+                }
+                else
+                {
+                    var strategy = strategyRegistry.Resolve(strategyName);
+                    foreach (var strategyError in strategy.ValidateEntry(entry, index))
+                    {
+                        errors.Add(strategyError);
+                    }
+                }
+            }
+            // Without a registry we can't validate the name (legacy callers
+            // never had strategies). Skip silently rather than false-flag.
+        }
+        else if (strategyRegistry is not null)
+        {
+            // No explicit strategy -> default to "wrap". Let it run its own
+            // validation in case it gains rules in the future.
+            strategyRegistry.Resolve(StrategyNames.Wrap)
+                .ValidateEntry(entry, index)
+                .ToList()
+                .ForEach(errors.Add);
+        }
+
+        // skills/harness fields only make sense for the skills strategy.
+        var effectiveStrategy = string.IsNullOrWhiteSpace(entry.Strategy) ? StrategyNames.Wrap : entry.Strategy!.Trim();
+        if (entry.Skills is { Count: > 0 } && !string.Equals(effectiveStrategy, StrategyNames.Skills, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add($"{prefix}.skills is only valid with strategy 'skills'; remove it or set strategy: 'skills'.");
+        }
+
+        if (entry.Harness is not null && !string.Equals(effectiveStrategy, StrategyNames.Skills, StringComparison.OrdinalIgnoreCase))
+        {
+            errors.Add($"{prefix}.harness is only valid with strategy 'skills'; remove it or set strategy: 'skills'.");
         }
 
         switch (entry.Source)
@@ -132,6 +214,10 @@ public static class ManifestValidator
                 break;
         }
     }
+
+    private static bool IsLegacyWrapStrategy(ConduitEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Strategy) ||
+        string.Equals(entry.Strategy, StrategyNames.Wrap, StringComparison.OrdinalIgnoreCase);
 
     private static void ValidateGitHubSource(GitHubSource source, string prefix, List<string> errors)
     {
@@ -334,19 +420,83 @@ public static class ManifestValidator
     }
 
     /// <summary>
-    ///     Detects two entries that would write into the same destination
-    ///     directory (<c>&lt;targetPath&gt;/&lt;destName&gt;/</c>). The check
-    ///     is conservative: it compares target path <i>strings</i> as-written
-    ///     (after light normalisation), without resolving <c>~</c>,
-    ///     environment variables, or symlinks. So
-    ///     <c>~/skills</c> vs <c>$HOME/skills</c> won't be flagged even when
-    ///     they resolve to the same directory; that's acceptable because the
-    ///     common collision case (two entries literally targeting the same
-    ///     directory string with the same dest name) is what bites in practice.
+    ///     Strategy-aware cross-entry collision check. Calls each entry's
+    ///     strategy.<see cref="IPlanStrategy.EnumerateStaticDestinations"/>
+    ///     with a synthetic <see cref="StaticPlanContext"/> using a path
+    ///     resolver that simply passes raw input through. The comparison is
+    ///     therefore intentionally lexical (matches the pre-strategy
+    ///     behaviour); the real path-resolved comparison happens in
+    ///     <see cref="ResolvedDestinationValidator"/>.
     /// </summary>
-    private static void ValidateCrossEntryDestinations(ConduitManifest manifest, List<string> errors)
+    private static void ValidateCrossEntryDestinations(
+        ConduitManifest manifest,
+        IPlanStrategyRegistry registry,
+        List<string> errors)
     {
-        // Map: (targetPath, destName) -> first-seen owning entry name.
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+        var snapshot = Strategies.StrategyConfigSnapshotBuilder.Build(manifest);
+        var passthroughResolver = new PassthroughPathResolver();
+
+        for (var i = 0; i < manifest.Entries.Count; i++)
+        {
+            var entry = manifest.Entries[i];
+            if (string.IsNullOrWhiteSpace(entry.Name) || entry.Targets is null || entry.Targets.Count == 0)
+            {
+                continue;
+            }
+
+            IPlanStrategy strategy;
+            try
+            {
+                strategy = registry.Resolve(entry.Strategy);
+            }
+            catch (UnknownStrategyException)
+            {
+                // Already reported by per-entry validation.
+                continue;
+            }
+
+            var ctx = new StaticPlanContext(entry, manifestDirectory: ".", passthroughResolver, snapshot);
+            IReadOnlyList<string> staticDests;
+            try
+            {
+                staticDests = strategy.EnumerateStaticDestinations(ctx);
+            }
+            catch
+            {
+                // Strategies that can't enumerate statically (e.g. throw
+                // because they need fetched content) are skipped here. Their
+                // collisions surface at sync time instead.
+                continue;
+            }
+
+            foreach (var dest in staticDests)
+            {
+                var key = NormalizeTargetPath(dest);
+                if (seen.TryGetValue(key, out var owner))
+                {
+                    if (!string.Equals(owner, entry.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        errors.Add(
+                            $"entries[{i}].targets: destination '{dest}' is already produced by entry '{owner}'. " +
+                            "Two entries cannot write into the same directory inside the same target; rename one (set 'name' or 'as').");
+                    }
+                }
+                else
+                {
+                    seen[key] = entry.Name!;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     The pre-strategy collision check, kept for callers that don't
+    ///     supply a <see cref="IPlanStrategyRegistry"/>. Mirrors the
+    ///     original wrap-only enumeration verbatim.
+    /// </summary>
+    private static void ValidateLegacyCrossEntryDestinations(ConduitManifest manifest, List<string> errors)
+    {
         var seen = new Dictionary<DestinationKey, string>();
 
         for (var i = 0; i < manifest.Entries.Count; i++)
@@ -354,11 +504,10 @@ public static class ManifestValidator
             var entry = manifest.Entries[i];
             if (string.IsNullOrWhiteSpace(entry.Name) || entry.Targets is null || entry.Targets.Count == 0)
             {
-                // Per-entry validation already errored; skip to avoid noise.
                 continue;
             }
 
-            foreach (var destination in EnumerateDestinations(entry))
+            foreach (var destination in EnumerateLegacyDestinations(entry))
             {
                 if (seen.TryGetValue(destination, out var owner))
                 {
@@ -375,12 +524,7 @@ public static class ManifestValidator
         }
     }
 
-    /// <summary>
-    ///     Enumerates every <c>(targetPath, destName)</c> tuple the entry
-    ///     would produce. Single-unit sources use <c>target.As ?? entry.Name</c>
-    ///     per target; multi-unit sources use each unit's resolved basename.
-    /// </summary>
-    private static IEnumerable<DestinationKey> EnumerateDestinations(ConduitEntry entry)
+    private static IEnumerable<DestinationKey> EnumerateLegacyDestinations(ConduitEntry entry)
     {
         var paths = entry.Source switch
         {
@@ -425,9 +569,6 @@ public static class ManifestValidator
 
     private static string NormalizeTargetPath(string path)
     {
-        // Normalise separators and trim trailing slash so equivalent
-        // string-forms collapse to one key. Don't resolve env vars / ~ here —
-        // the collision check is best-effort and only catches literal matches.
         var normalized = path.Trim().Replace('\\', '/');
         if (normalized.Length > 1 && normalized.EndsWith('/'))
         {
@@ -438,4 +579,15 @@ public static class ManifestValidator
     }
 
     private readonly record struct DestinationKey(string TargetPath, string DestName);
+
+    /// <summary>
+    ///     A no-op <see cref="Paths.IPathResolver"/> used during static
+    ///     validation: it returns the input unchanged. Strategies that
+    ///     enumerate static destinations get the raw target strings back,
+    ///     which preserves the legacy lexical collision behaviour.
+    /// </summary>
+    private sealed class PassthroughPathResolver : Paths.IPathResolver
+    {
+        public string Resolve(string value, string basePath) => value;
+    }
 }

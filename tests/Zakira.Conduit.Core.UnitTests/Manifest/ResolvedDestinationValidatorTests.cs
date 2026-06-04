@@ -38,7 +38,7 @@ public sealed class ResolvedDestinationValidatorTests
             ],
         };
 
-        var validator = new ResolvedDestinationValidator(new DefaultPathResolver(env));
+        var validator = new ResolvedDestinationValidator(new DefaultPathResolver(env), StrategyTestHelper.BuildDefaultRegistry());
         var errors = validator.Validate(manifest, manifestPath);
 
         errors.Should().ContainSingle();
@@ -73,7 +73,7 @@ public sealed class ResolvedDestinationValidatorTests
             ],
         };
 
-        var validator = new ResolvedDestinationValidator(new DefaultPathResolver(new FakeEnvironment()));
+        var validator = new ResolvedDestinationValidator(new DefaultPathResolver(new FakeEnvironment()), StrategyTestHelper.BuildDefaultRegistry());
         var errors = validator.Validate(manifest, manifestPath);
 
         errors.Should().BeEmpty();
@@ -107,7 +107,7 @@ public sealed class ResolvedDestinationValidatorTests
             ],
         };
 
-        var validator = new ResolvedDestinationValidator(new DefaultPathResolver(new FakeEnvironment()));
+        var validator = new ResolvedDestinationValidator(new DefaultPathResolver(new FakeEnvironment()), StrategyTestHelper.BuildDefaultRegistry());
         var errors = validator.Validate(manifest, manifestPath);
 
         errors.Should().BeEmpty();

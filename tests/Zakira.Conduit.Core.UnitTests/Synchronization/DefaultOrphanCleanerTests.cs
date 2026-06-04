@@ -11,7 +11,7 @@ public sealed class DefaultOrphanCleanerTests
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     private static DefaultOrphanCleaner BuildCleaner(IConduitStateStore store) =>
-        new(store, new DefaultPathResolver(new FakeEnvironment()), NullLogger<DefaultOrphanCleaner>.Instance);
+        new(store, new DefaultPathResolver(new FakeEnvironment()), StrategyTestHelper.BuildDefaultRegistry(), NullLogger<DefaultOrphanCleaner>.Instance);
 
     [Fact]
     public async Task Removes_orphan_target_directories_and_prunes_state()

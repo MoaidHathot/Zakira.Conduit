@@ -25,4 +25,12 @@ public sealed record ConduitManifest
     /// </summary>
     [JsonPropertyName("$schema")]
     public string? Schema { get; init; }
+
+    /// <summary>
+    ///     Optional manifest-global strategy configuration: per-strategy
+    ///     defaults and (for the skills strategy) custom harness registry
+    ///     additions and removals.
+    /// </summary>
+    [JsonPropertyName("strategies")]
+    public StrategiesConfig? Strategies { get; init; }
 }

@@ -157,6 +157,14 @@ public sealed class SourceInferenceCoordinator
                 Disabled = entry.Disabled,
                 Source = concreteElement,
                 Targets = entry.Targets,
+                // Strategy-related fields propagate to every expanded sub-entry
+                // so array-shaped manifests behave the same as N hand-written
+                // entries that all share the parent's strategy/groupBy/etc.
+                Strategy = entry.Strategy,
+                GroupBy = entry.GroupBy,
+                OnCollision = entry.OnCollision,
+                Skills = entry.Skills,
+                Harness = entry.Harness,
                 OriginalDiskEntryIndex = index,
                 OriginalArrayElementIndex = j,
             });

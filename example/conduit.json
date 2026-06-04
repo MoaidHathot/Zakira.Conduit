@@ -4,7 +4,7 @@
   "entries": [
     {
       "name": "PowerReview",
-      "description": "Public GitHub skill. Source is a bare URL; Conduit infers the kind.",
+      "description": "Public GitHub skill. Source is a bare URL; Conduit infers the kind. Default 'wrap' strategy places content under ~/projects/my-app/.agents/skills/PowerReview/.",
       "source": "https://github.com/MoaidHathot/PowerReview",
       "targets": [
         "~/projects/my-app/.agents/skills"
@@ -85,6 +85,60 @@
       "targets": [
         "~/.config/zed/skills"
       ]
+    },
+    {
+      "name": "flat-tools",
+      "description": "Strategy 'flat' merges the source's files directly into the target (no per-entry wrapping sub-directory). Useful for layered overlays.",
+      "disabled": true,
+      "strategy": "flat",
+      "source": "https://github.com/example-org/dotfiles",
+      "targets": [
+        "~/.config/my-tool"
+      ]
+    },
+    {
+      "name": "expand-collection",
+      "description": "Strategy 'expand' lifts each top-level child directory of the source to its own sub-directory at the target. Files at the source root are ignored.",
+      "disabled": true,
+      "strategy": "expand",
+      "source": "https://github.com/example-org/skill-pack",
+      "targets": [
+        "~/.config/agents/skill-pack-children"
+      ]
+    },
+    {
+      "name": "skills-discover",
+      "description": "Strategy 'skills' walks the source for SKILL.md folders and fans each one out into every detected agent harness under the target (.opencode/skills, .claude/skills, .codex/skills, .agents/skills, plus OpenCode's global .config/opencode/skills when target is ~).",
+      "disabled": true,
+      "strategy": "skills",
+      "source": [
+        "https://github.com/MoaidHathot/ActionView",
+        "https://github.com/MoaidHathot/PowerReview"
+      ],
+      "groupBy": "source",
+      "targets": [
+        "~"
+      ]
+    },
+    {
+      "name": "skills-claude-only",
+      "description": "Same skills strategy, restricted to the 'claude' harness with the per-entry harness filter.",
+      "disabled": true,
+      "strategy": "skills",
+      "source": "https://github.com/MoaidHathot/Zakira.Conduit",
+      "harness": ["claude"],
+      "targets": [
+        "~"
+      ]
     }
-  ]
+  ],
+  "strategies": {
+    "skills": {
+      "harnessRegistry": {
+        ".my-tool": "skills",
+        ".other-tool": ["a/skills", "b/skills"]
+      },
+      "onCollision": "error"
+    }
+  }
 }

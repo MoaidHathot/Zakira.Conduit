@@ -1,5 +1,6 @@
 using Zakira.Conduit.Manifest;
 using Zakira.Conduit.Paths;
+using Zakira.Conduit.Strategies;
 
 namespace Zakira.Conduit.Manifest;
 
@@ -16,11 +17,14 @@ namespace Zakira.Conduit.Manifest;
 public sealed class ResolvedDestinationValidator
 {
     private readonly IPathResolver _pathResolver;
+    private readonly IPlanStrategyRegistry _strategies;
 
-    public ResolvedDestinationValidator(IPathResolver pathResolver)
+    public ResolvedDestinationValidator(IPathResolver pathResolver, IPlanStrategyRegistry strategies)
     {
         ArgumentNullException.ThrowIfNull(pathResolver);
+        ArgumentNullException.ThrowIfNull(strategies);
         _pathResolver = pathResolver;
+        _strategies = strategies;
     }
 
     /// <summary>
@@ -43,6 +47,7 @@ public sealed class ResolvedDestinationValidator
         var comparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparer.OrdinalIgnoreCase
             : StringComparer.Ordinal;
+        var snapshot = StrategyConfigSnapshotBuilder.Build(manifest);
 
         // Map: resolved-destination-path -> first-seen owning entry name.
         var seen = new Dictionary<string, string>(comparer);
@@ -56,83 +61,57 @@ public sealed class ResolvedDestinationValidator
                 continue;
             }
 
-            foreach (var resolved in EnumerateResolvedDestinations(entry, manifestDir))
+            IPlanStrategy strategy;
+            try
             {
-                if (seen.TryGetValue(resolved, out var owner))
+                strategy = _strategies.Resolve(entry.Strategy);
+            }
+            catch (UnknownStrategyException)
+            {
+                // Per-entry validator already surfaced this.
+                continue;
+            }
+
+            IReadOnlyList<string> staticDests;
+            try
+            {
+                var ctx = new StaticPlanContext(entry, manifestDir, _pathResolver, snapshot);
+                staticDests = strategy.EnumerateStaticDestinations(ctx);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var resolved in staticDests)
+            {
+                string normalised;
+                try
                 {
-                    // Only emit when the OWNING entry-name differs from this one;
-                    // a single entry repeating itself in `targets` is caught
-                    // elsewhere.
+                    normalised = Normalise(Path.GetFullPath(resolved));
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (seen.TryGetValue(normalised, out var owner))
+                {
                     if (!string.Equals(owner, entry.Name, StringComparison.OrdinalIgnoreCase))
                     {
                         errors.Add(
-                            $"entries[{i}].targets: resolved destination '{resolved}' is already produced by entry '{owner}'. " +
+                            $"entries[{i}].targets: resolved destination '{normalised}' is already produced by entry '{owner}'. " +
                             "Two entries cannot write into the same directory (after expanding '~', env vars, and relative paths); rename one (set 'name' or 'as').");
                     }
                 }
                 else
                 {
-                    seen[resolved] = entry.Name!;
+                    seen[normalised] = entry.Name!;
                 }
             }
         }
 
         return errors;
-    }
-
-    /// <summary>
-    ///     Enumerates each entry's resolved destination directories using the
-    ///     same name/alias rules the synchronizer follows. Path strings are
-    ///     full-pathed so equivalent input strings collapse to the same key.
-    /// </summary>
-    private IEnumerable<string> EnumerateResolvedDestinations(ConduitEntry entry, string manifestDir)
-    {
-        var multiUnitDestNames = entry.Source switch
-        {
-            GitHubSource gh when gh.EffectivePaths.Count > 1 => gh.EffectivePaths.Select(p => p.ResolvedBasename).ToList(),
-            AzdoSource azdo when azdo.EffectivePaths.Count > 1 => azdo.EffectivePaths.Select(p => p.ResolvedBasename).ToList(),
-            LocalDirectorySource local when local.EffectivePaths.Count > 1 => local.EffectivePaths.Select(p => p.ResolvedBasename).ToList(),
-            _ => null,
-        };
-
-        foreach (var target in entry.Targets)
-        {
-            if (target is null || string.IsNullOrWhiteSpace(target.Path))
-            {
-                continue;
-            }
-
-            string resolvedParent;
-            try
-            {
-                resolvedParent = _pathResolver.Resolve(target.Path, manifestDir);
-            }
-            catch
-            {
-                // If the path resolver throws on a malformed input, skip; the
-                // static validator (or the synchronizer at run-time) will
-                // surface a more specific error.
-                continue;
-            }
-
-            if (multiUnitDestNames is not null)
-            {
-                foreach (var unitName in multiUnitDestNames)
-                {
-                    var combined = Path.GetFullPath(Path.Combine(resolvedParent, unitName));
-                    yield return Normalise(combined);
-                }
-            }
-            else
-            {
-                var destName = string.IsNullOrWhiteSpace(target.As) ? entry.Name : target.As;
-                if (!string.IsNullOrWhiteSpace(destName))
-                {
-                    var combined = Path.GetFullPath(Path.Combine(resolvedParent, destName!));
-                    yield return Normalise(combined);
-                }
-            }
-        }
     }
 
     private static string Normalise(string fullPath) =>

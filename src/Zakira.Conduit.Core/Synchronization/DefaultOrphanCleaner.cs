@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Zakira.Conduit.Manifest;
 using Zakira.Conduit.Paths;
+using Zakira.Conduit.Strategies;
 
 namespace Zakira.Conduit.Synchronization;
 
@@ -15,18 +16,22 @@ public sealed class DefaultOrphanCleaner : IOrphanCleaner
 {
     private readonly IConduitStateStore _stateStore;
     private readonly IPathResolver _pathResolver;
+    private readonly IPlanStrategyRegistry _strategies;
     private readonly ILogger<DefaultOrphanCleaner> _logger;
 
     public DefaultOrphanCleaner(
         IConduitStateStore stateStore,
         IPathResolver pathResolver,
+        IPlanStrategyRegistry strategies,
         ILogger<DefaultOrphanCleaner> logger)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(pathResolver);
+        ArgumentNullException.ThrowIfNull(strategies);
         ArgumentNullException.ThrowIfNull(logger);
         _stateStore = stateStore;
         _pathResolver = pathResolver;
+        _strategies = strategies;
         _logger = logger;
     }
 
@@ -44,10 +49,14 @@ public sealed class DefaultOrphanCleaner : IOrphanCleaner
 
         var manifestDir = Path.GetDirectoryName(Path.GetFullPath(manifestPath)) ?? Directory.GetCurrentDirectory();
         var pathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var strategiesConfig = StrategyConfigSnapshotBuilder.Build(manifest);
 
         // 1. Build the set of "live" destination directories the current
-        // manifest produces. The cleaner refuses to delete any directory in
-        // this set, even if a stale state row also claims it.
+        // manifest produces. For strategies that enumerate statically (wrap,
+        // flat) we use their static destinations. For strategies that don't
+        // (skills, expand) we trust the previous-sync state.Targets so a
+        // surviving entry's existing destinations don't get pulled out from
+        // under it on rename of an unrelated entry.
         var liveDestinations = new Dictionary<string, string>(OperatingSystem.IsWindows()
             ? StringComparer.OrdinalIgnoreCase
             : StringComparer.Ordinal);
@@ -61,7 +70,8 @@ public sealed class DefaultOrphanCleaner : IOrphanCleaner
             }
 
             liveEntryNames.Add(entry.Name);
-            foreach (var dest in EnumerateLiveDestinations(entry, manifestDir))
+
+            foreach (var dest in EnumerateLiveDestinations(entry, manifestDir, state, strategiesConfig))
             {
                 liveDestinations[NormaliseFullPath(dest)] = entry.Name;
             }
@@ -187,48 +197,74 @@ public sealed class DefaultOrphanCleaner : IOrphanCleaner
     }
 
     /// <summary>
-    ///     Computes the set of destination directories an entry would write
-    ///     to on a fresh sync. Mirrors the rules in
-    ///     <see cref="DefaultConduitSynchronizer"/> so the cleaner never
-    ///     reports a "live" dir as orphan, nor an orphan dir as still live.
+    ///     Returns the destination directories <paramref name="entry"/> claims
+    ///     as "mine" right now. Strategy-aware:
+    ///     <list type="bullet">
+    ///         <item><description>
+    ///             Strategies that enumerate statically (wrap, flat) report
+    ///             every dir a fresh sync would produce.
+    ///         </description></item>
+    ///         <item><description>
+    ///             Strategies that depend on fetched content (skills, expand)
+    ///             return an empty static list; we fall back to the entry's
+    ///             previous-sync state targets so live destinations from the
+    ///             last successful run are still claimed.
+    ///         </description></item>
+    ///     </list>
     /// </summary>
-    private IEnumerable<string> EnumerateLiveDestinations(ConduitEntry entry, string manifestDir)
+    private IEnumerable<string> EnumerateLiveDestinations(
+        ConduitEntry entry,
+        string manifestDir,
+        ConduitState state,
+        StrategyConfigSnapshot strategiesConfig)
     {
         if (entry.Targets is null || entry.Targets.Count == 0)
         {
             yield break;
         }
 
-        var multiUnitDestNames = entry.Source switch
+        IPlanStrategy strategy;
+        try
         {
-            GitHubSource gh when gh.EffectivePaths.Count > 1 => gh.EffectivePaths.Select(p => p.ResolvedBasename).ToList(),
-            AzdoSource azdo when azdo.EffectivePaths.Count > 1 => azdo.EffectivePaths.Select(p => p.ResolvedBasename).ToList(),
-            LocalDirectorySource local when local.EffectivePaths.Count > 1 => local.EffectivePaths.Select(p => p.ResolvedBasename).ToList(),
-            _ => null,
-        };
+            strategy = _strategies.Resolve(entry.Strategy);
+        }
+        catch (UnknownStrategyException)
+        {
+            // Validator already surfaces this; treat as no static claims.
+            yield break;
+        }
 
-        foreach (var target in entry.Targets)
+        var ctx = new StaticPlanContext(entry, manifestDir, _pathResolver, strategiesConfig);
+        IReadOnlyList<string> staticDests;
+        try
         {
-            if (target is null || string.IsNullOrWhiteSpace(target.Path))
+            staticDests = strategy.EnumerateStaticDestinations(ctx);
+        }
+        catch
+        {
+            staticDests = Array.Empty<string>();
+        }
+
+        if (staticDests.Count > 0)
+        {
+            foreach (var d in staticDests)
             {
-                continue;
+                yield return d;
             }
 
-            var resolvedParent = _pathResolver.Resolve(target.Path, manifestDir);
+            yield break;
+        }
 
-            if (multiUnitDestNames is not null)
+        // Content-dependent strategy: claim whatever the previous successful
+        // sync recorded under this entry's name in state.
+        if (!string.IsNullOrWhiteSpace(entry.Name) &&
+            state.Entries.TryGetValue(entry.Name, out var record))
+        {
+            foreach (var target in record.Targets)
             {
-                foreach (var unitName in multiUnitDestNames)
+                if (!string.IsNullOrWhiteSpace(target))
                 {
-                    yield return Path.Combine(resolvedParent, unitName);
-                }
-            }
-            else
-            {
-                var destName = string.IsNullOrWhiteSpace(target.As) ? entry.Name : target.As;
-                if (!string.IsNullOrWhiteSpace(destName))
-                {
-                    yield return Path.Combine(resolvedParent, destName!);
+                    yield return target;
                 }
             }
         }

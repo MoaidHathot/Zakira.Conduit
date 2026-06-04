@@ -7,14 +7,16 @@ using Zakira.Conduit.Manifest;
 using Zakira.Conduit.Mirroring;
 using Zakira.Conduit.Paths;
 using Zakira.Conduit.Sources;
+using Zakira.Conduit.Strategies;
 
 namespace Zakira.Conduit.Synchronization;
 
 /// <summary>
 ///     Default <see cref="IConduitSynchronizer"/>. Orchestrates the per-entry
 ///     pipeline: load state -> select fetcher -> fetch (skipping when state +
-///     targets prove the entry is up-to-date) -> mirror each content unit to
-///     each target -> persist state.
+///     targets prove the entry is up-to-date) -> resolve the entry's
+///     <see cref="IPlanStrategy"/> -> mirror every planned destination
+///     -> persist state.
 /// </summary>
 public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 {
@@ -22,6 +24,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
     private readonly IDirectoryMirror _mirror;
     private readonly IPathResolver _pathResolver;
     private readonly IConduitStateStore _stateStore;
+    private readonly IPlanStrategyRegistry _strategies;
     private readonly ILogger<DefaultConduitSynchronizer> _logger;
 
     public DefaultConduitSynchronizer(
@@ -29,18 +32,21 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         IDirectoryMirror mirror,
         IPathResolver pathResolver,
         IConduitStateStore stateStore,
+        IPlanStrategyRegistry strategies,
         ILogger<DefaultConduitSynchronizer> logger)
     {
         ArgumentNullException.ThrowIfNull(fetchers);
         ArgumentNullException.ThrowIfNull(mirror);
         ArgumentNullException.ThrowIfNull(pathResolver);
         ArgumentNullException.ThrowIfNull(stateStore);
+        ArgumentNullException.ThrowIfNull(strategies);
         ArgumentNullException.ThrowIfNull(logger);
 
         _fetchers = fetchers;
         _mirror = mirror;
         _pathResolver = pathResolver;
         _stateStore = stateStore;
+        _strategies = strategies;
         _logger = logger;
     }
 
@@ -57,6 +63,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
         var swOverall = Stopwatch.StartNew();
         var state = await _stateStore.LoadAsync(manifestFullPath, cancellationToken).ConfigureAwait(false);
+        var strategiesConfig = StrategyConfigSnapshotBuilder.Build(manifest);
 
         var entryFilter = (options.EntryNames is { Count: > 0 })
             ? new HashSet<string>(options.EntryNames, StringComparer.OrdinalIgnoreCase)
@@ -111,7 +118,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 return;
             }
 
-            var result = await SyncEntryAsync(tuple.entry, manifestFullPath, manifestDir, options, state, ct).ConfigureAwait(false);
+            var result = await SyncEntryAsync(tuple.entry, manifestFullPath, manifestDir, options, state, strategiesConfig, ct).ConfigureAwait(false);
             processedResults[tuple.index] = result;
 
             if (!result.Succeeded && options.StopOnFirstError)
@@ -160,7 +167,14 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
     private static SyncEntryResult SkippedResult(ConduitEntry entry) =>
         new(entry, Skipped: true, Succeeded: true, ResolvedRef: null, Targets: Array.Empty<SyncTargetResult>(), Error: null, Elapsed: TimeSpan.Zero);
 
-    private async Task<SyncEntryResult> SyncEntryAsync(ConduitEntry entry, string manifestFullPath, string manifestDir, SyncOptions options, ConduitState state, CancellationToken cancellationToken)
+    private async Task<SyncEntryResult> SyncEntryAsync(
+        ConduitEntry entry,
+        string manifestFullPath,
+        string manifestDir,
+        SyncOptions options,
+        ConduitState state,
+        StrategyConfigSnapshot strategiesConfig,
+        CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         var previousState = _stateStore.GetEntry(state, entry.ResolvedName);
@@ -185,13 +199,14 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 Elapsed: sw.Elapsed);
         }
 
-        _logger.LogInformation("Syncing entry '{Name}' from {Kind}", entry.ResolvedName, entry.Source.Kind);
+        _logger.LogInformation("Syncing entry '{Name}' from {Kind} (strategy: {Strategy})", entry.ResolvedName, entry.Source.Kind, entry.Strategy ?? StrategyNames.Wrap);
 
         FetchedSource? fetched = null;
         var attemptedRetryWithoutEtag = false;
         try
         {
             var fetcher = _fetchers.GetFetcher(entry.Source);
+            var strategy = _strategies.Resolve(entry.Strategy);
 
             while (true)
             {
@@ -213,16 +228,15 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 }
 
                 // 304 path. Verify the targets still exist; if so, treat as up-to-date.
-                var targetsResolved = entry.Targets
-                    .Select(targetSpec =>
-                    {
-                        var resolvedParent = _pathResolver.Resolve(targetSpec.Path, manifestDir);
-                        var destName = targetSpec.As ?? entry.ResolvedName;
-                        return Path.Combine(resolvedParent, destName);
-                    })
-                    .ToList();
+                // The 304 fast-path uses the strategy's STATIC destinations
+                // (for wrap, the legacy entry-name layout); strategies that
+                // can't enumerate statically (skills, expand) record their
+                // previous destinations in state.Targets and reuse those.
+                var targetsResolved = previousState?.Targets is { Count: > 0 }
+                    ? previousState.Targets.ToList()
+                    : ComputeStaticTargetsForShortCircuit(entry, strategy, manifestDir, strategiesConfig);
 
-                if (targetsResolved.All(Directory.Exists))
+                if (targetsResolved.Count > 0 && targetsResolved.All(Directory.Exists))
                 {
                     _logger.LogInformation("304 Not Modified for '{Name}'; targets are present.", entry.ResolvedName);
 
@@ -271,66 +285,59 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 // Loop to re-fetch without the etag hint.
             }
 
-            // Per design: when there is exactly one content unit the entry name
-            // is the destination sub-directory; with two or more, each unit's
-            // suggested name becomes the destination and the entry name is
-            // metadata only (logs / --entry filtering).
-            var singleUnit = fetched.Contents.Count == 1;
+            var mirrorFilter = BuildMirrorFilter(entry.Source);
+            var planContext = new PlanContext(
+                entry: entry,
+                fetched: fetched,
+                manifestDirectory: manifestDir,
+                pathResolver: _pathResolver,
+                filter: mirrorFilter,
+                strategiesConfig: strategiesConfig);
 
-            // capacity = N units * M targets
-            var targetResults = new List<SyncTargetResult>(fetched.Contents.Count * entry.Targets.Count);
-
-            foreach (var unit in fetched.Contents)
+            IReadOnlyList<PlannedDestination> planned;
+            try
             {
-                var fetchedFull = Path.GetFullPath(unit.ContentDirectory);
+                planned = strategy.Plan(planContext);
+            }
+            catch (StrategyPlanException ex)
+            {
+                sw.Stop();
+                _logger.LogError(ex, "Strategy '{Strategy}' refused to plan entry '{Name}'", strategy.Name, entry.ResolvedName);
+                return new SyncEntryResult(entry, Skipped: false, Succeeded: false, ResolvedRef: fetched.ResolvedRef, Targets: Array.Empty<SyncTargetResult>(), Error: ex.Message, Elapsed: sw.Elapsed);
+            }
 
-                foreach (var targetSpec in entry.Targets)
+            var targetResults = new List<SyncTargetResult>(planned.Count);
+
+            foreach (var destination in planned)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var perDestFilter = destination.Filter;
+                var fetchedFull = Path.GetFullPath(destination.SourceDirectory);
+                var resolvedTarget = destination.TargetDirectory;
+
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    GuardAgainstOverlap(fetchedFull, resolvedTarget);
 
-                    // Per design:
-                    //   - single unit: destination = target.As (per-target alias) ?? entry.ResolvedName
-                    //   - multi unit:  destination = unit.SuggestedDestinationName (path basename / alias)
-                    string destName;
-                    if (singleUnit)
+                    if (options.DryRun)
                     {
-                        destName = targetSpec.As ?? entry.ResolvedName;
+                        _logger.LogInformation("[dry-run] Would mirror '{Source}' to '{Target}'", destination.SourceDirectory, resolvedTarget);
+                        var fileCount = Directory.Exists(destination.SourceDirectory)
+                            ? CountFilteredFiles(destination.SourceDirectory, perDestFilter ?? MirrorFilter.MatchEverything)
+                            : 0;
+                        targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: fileCount, Error: null));
                     }
                     else
                     {
-                        destName = unit.SuggestedDestinationName
-                                   ?? throw new InvalidOperationException(
-                                       $"Source '{entry.Source.Kind}' returned multiple content units but failed to suggest a destination name for one of them.");
+                        var written = await _mirror.MirrorAsync(destination.SourceDirectory, resolvedTarget, perDestFilter, cancellationToken).ConfigureAwait(false);
+                        targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: written, Error: null));
                     }
-
-                    var resolvedParent = _pathResolver.Resolve(targetSpec.Path, manifestDir);
-                    var resolvedTarget = Path.Combine(resolvedParent, destName);
-
-                    var mirrorFilter = BuildMirrorFilter(entry.Source);
-
-                    try
-                    {
-                        GuardAgainstOverlap(fetchedFull, resolvedTarget);
-
-                        if (options.DryRun)
-                        {
-                            _logger.LogInformation("[dry-run] Would mirror '{Source}' to '{Target}'", unit.ContentDirectory, resolvedTarget);
-                            var fileCount = Directory.Exists(unit.ContentDirectory)
-                                ? CountFilteredFiles(unit.ContentDirectory, mirrorFilter)
-                                : 0;
-                            targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: fileCount, Error: null));
-                        }
-                        else
-                        {
-                            var written = await _mirror.MirrorAsync(unit.ContentDirectory, resolvedTarget, mirrorFilter, cancellationToken).ConfigureAwait(false);
-                            targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: written, Error: null));
-                        }
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        _logger.LogError(ex, "Failed to mirror entry '{Name}' into target '{Target}'", entry.ResolvedName, resolvedTarget);
-                        targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: false, FilesWritten: 0, Error: ex.Message));
-                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Failed to mirror entry '{Name}' into target '{Target}'", entry.ResolvedName, resolvedTarget);
+                    targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: false, FilesWritten: 0, Error: ex.Message));
                 }
             }
 
@@ -372,6 +379,30 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
     }
 
     /// <summary>
+    ///     Best-effort target enumeration used during the 304 fast-path. For
+    ///     strategies that enumerate statically (wrap, flat) this matches
+    ///     what a fresh sync would produce. Strategies that can't (skills,
+    ///     expand) return an empty list here; the caller already prefers the
+    ///     previous-state target list over this estimate.
+    /// </summary>
+    private List<string> ComputeStaticTargetsForShortCircuit(
+        ConduitEntry entry,
+        IPlanStrategy strategy,
+        string manifestDir,
+        StrategyConfigSnapshot strategiesConfig)
+    {
+        try
+        {
+            var ctx = new StaticPlanContext(entry, manifestDir, _pathResolver, strategiesConfig);
+            return strategy.EnumerateStaticDestinations(ctx).ToList();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    /// <summary>
     ///     Returns <see langword="true"/> when the entry is provably up-to-date
     ///     without any network IO. Supports:
     ///     <list type="bullet">
@@ -385,6 +416,15 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         currentSourceHash = null;
 
         if (previousState is null)
+        {
+            return false;
+        }
+
+        // Strategies whose plan depends on fetched content can't safely
+        // short-circuit purely from state: a SKILL.md inside the source may
+        // have been renamed, or a new harness installed under the target.
+        // Restrict the short-circuit to the legacy wrap strategy.
+        if (!IsLegacyWrapStrategy(entry))
         {
             return false;
         }
@@ -431,6 +471,10 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 return false;
         }
     }
+
+    private static bool IsLegacyWrapStrategy(ConduitEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Strategy) ||
+        string.Equals(entry.Strategy, StrategyNames.Wrap, StringComparison.OrdinalIgnoreCase);
 
     private bool GithubExpectedTargetsExist(ConduitEntry entry, GitHubSource gh, string manifestDir, EntryState previousState)
     {

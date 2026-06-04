@@ -138,6 +138,66 @@ Run an initial sync, then re-sync whenever the manifest file changes on disk. Ct
 | `--debounce <ms>` | Coalesce burst writes from editors that save via temp + rename. Default `250`. |
 | `-p, --parallel <N>` | Forwarded to each re-run. Default `4`. |
 
+## `conduit copy <source> <target>`
+
+One-shot copy that bypasses the manifest entirely. Synthesises a one-entry
+manifest from the supplied source URI (same shorthand syntax as a manifest
+`source` string &mdash; bare URL, `URL -> Alias`, `./local/path`, etc.) and
+runs the standard synchronizer against the supplied target directory.
+
+Useful for scripting, ad-hoc installs, and previewing strategies before
+adding them to your manifest.
+
+| Option | Description |
+|---|---|
+| `-s, --strategy <name>` | Which strategy controls destination layout. One of `wrap` (default), `flat`, `expand`, `skills`. |
+| `--group-by source` | Wrap each source's planned output in a source-named sub-directory under the target. |
+| `--on-collision <mode>` | Conflict policy when two destinations resolve to the same path. One of `error` (default), `skip`, `last-wins`. |
+| `--skills name1,name2` | Skills-strategy only: restrict to the named skills. Repeatable and comma-separated. |
+| `--harness name\|true\|false` | Skills-strategy only: enable / disable harness discovery, or restrict to named harnesses (`opencode`, `claude`, `codex`, `agents`). Repeatable and comma-separated. |
+| `--add-harness name=path` | Add a custom harness to the registry for this run only. Repeatable. Example: `--add-harness .my-tool=skills/`. |
+| `--dry-run` | Plan and report what would change without writing to the target. |
+
+Examples:
+
+```bash
+# Mirror a public skill repo into a literal skills directory.
+conduit copy https://github.com/anthropics/skills ~/.config/agents/skills --strategy skills
+
+# Same, but only the 'code-review' skill, and fanned out across every
+# detected agent harness under ~.
+conduit copy https://github.com/anthropics/skills ~ --strategy skills --skills code-review --harness true
+
+# Lift each top-level child of a dotfiles repo into a separate
+# sub-directory under ~/.config/my-tool/.
+conduit copy https://github.com/example-org/dotfiles ~/.config/my-tool --strategy expand
+```
+
+JSON output: `{ "name": "<entry>", "strategy": "...", "dryRun": ..., "succeeded": ..., "targets": [ { "path": ..., "succeeded": ..., "filesWritten": ..., "error": ... } ] }`.
+
+## `conduit skills probe <target>`
+
+Scan a target directory one level deep for registered agent-harness skills
+folders (`.opencode/skills`, `.claude/skills`, `.codex/skills`,
+`.agents/skills`, plus any custom additions from the manifest's
+`strategies.skills.harnessRegistry`).
+
+Returns exit `0` when at least one harness matches, exit `1` when none do.
+Useful before adding a skills entry to verify the target is where you think
+it is.
+
+Examples:
+
+```bash
+# What harnesses do I have under my home directory?
+conduit skills probe ~
+
+# Same, but using a custom registry from a specific manifest.
+conduit skills probe --manifest ./conduit.json ~/projects/my-app
+```
+
+JSON output: `{ "requested": "...", "resolved": "...", "registry": { ... }, "matches": [ { "harness": "...", "matched": "...", "directory": "..." } ] }`.
+
 ## Environment variables
 
 ### GitHub

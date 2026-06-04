@@ -12,6 +12,8 @@ using Zakira.Conduit.Sources.GitHub;
 using Zakira.Conduit.Sources.GitHub.Credentials;
 using Zakira.Conduit.Sources.Inference;
 using Zakira.Conduit.Sources.Local;
+using Zakira.Conduit.Strategies;
+using Zakira.Conduit.Strategies.Skills;
 using Zakira.Conduit.Synchronization;
 
 namespace Zakira.Conduit.DependencyInjection;
@@ -37,7 +39,8 @@ public static class ConduitCoreServiceCollectionExtensions
         services.TryAddSingleton<IManifestLoader>(sp =>
             new JsonManifestLoader(
                 sp.GetService<SourceInferenceCoordinator>(),
-                sp.GetService<IPathResolver>()));
+                sp.GetService<IPathResolver>(),
+                sp.GetService<IPlanStrategyRegistry>()));
         services.TryAddSingleton<IManifestWriter, JsonNodeManifestWriter>();
         services.TryAddSingleton<IPathResolver, DefaultPathResolver>();
         services.TryAddSingleton<IDirectoryMirror, AtomicDirectoryMirror>();
@@ -50,6 +53,7 @@ public static class ConduitCoreServiceCollectionExtensions
         services.AddLocalDirectorySource();
         services.AddAzdoSource();
         services.AddSourceInference();
+        services.AddPlanStrategies();
 
         return services;
     }
@@ -194,6 +198,29 @@ public static class ConduitCoreServiceCollectionExtensions
         services.AddSingleton<ISourceInferrer, GitHubSourceInferrer>();
         services.AddSingleton<ISourceInferrer, AzdoSourceInferrer>();
         services.AddSingleton<SourceInferenceCoordinator>();
+
+        return services;
+    }
+
+    /// <summary>
+    ///     Registers the built-in plan strategies (<c>wrap</c>, <c>flat</c>,
+    ///     <c>expand</c>, <c>skills</c>) and the
+    ///     <see cref="IPlanStrategyRegistry"/> that fronts them. Safe to call
+    ///     standalone if you want to compose strategies into a custom pipeline.
+    /// </summary>
+    public static IServiceCollection AddPlanStrategies(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton<IPathResolver, DefaultPathResolver>();
+        services.TryAddSingleton<HarnessTargetResolver>();
+
+        services.AddSingleton<IPlanStrategy, WrapPlanStrategy>();
+        services.AddSingleton<IPlanStrategy, FlatPlanStrategy>();
+        services.AddSingleton<IPlanStrategy, ExpandPlanStrategy>();
+        services.AddSingleton<IPlanStrategy, SkillsPlanStrategy>();
+
+        services.TryAddSingleton<IPlanStrategyRegistry, PlanStrategyRegistry>();
 
         return services;
     }

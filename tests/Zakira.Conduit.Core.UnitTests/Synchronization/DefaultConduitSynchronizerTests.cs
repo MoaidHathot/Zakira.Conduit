@@ -19,7 +19,7 @@ public sealed class DefaultConduitSynchronizerTests
         var mirror = new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance);
         var env = new FakeEnvironment();
         var resolver = new DefaultPathResolver(env);
-        var synchronizer = new DefaultConduitSynchronizer(registry, mirror, resolver, new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance), NullLogger<DefaultConduitSynchronizer>.Instance);
+        var synchronizer = new DefaultConduitSynchronizer(registry, mirror, resolver, new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance), StrategyTestHelper.BuildDefaultRegistry(resolver), NullLogger<DefaultConduitSynchronizer>.Instance);
         return (synchronizer, fetcher, env);
     }
 
@@ -152,7 +152,7 @@ public sealed class DefaultConduitSynchronizerTests
         var mirror = new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance);
         var env = new FakeEnvironment();
         var resolver = new DefaultPathResolver(env);
-        var sync = new DefaultConduitSynchronizer(registry, mirror, resolver, new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance), NullLogger<DefaultConduitSynchronizer>.Instance);
+        var sync = new DefaultConduitSynchronizer(registry, mirror, resolver, new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance), StrategyTestHelper.BuildDefaultRegistry(resolver), NullLogger<DefaultConduitSynchronizer>.Instance);
 
         var manifest = new ConduitManifest
         {
@@ -186,6 +186,7 @@ public sealed class DefaultConduitSynchronizerTests
             new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance),
             new DefaultPathResolver(new FakeEnvironment()),
             new JsonConduitStateStore(NullLogger<JsonConduitStateStore>.Instance),
+            StrategyTestHelper.BuildDefaultRegistry(),
             NullLogger<DefaultConduitSynchronizer>.Instance);
 
         var manifest = new ConduitManifest
@@ -516,6 +517,7 @@ public sealed class DefaultConduitSynchronizerTests
             new AtomicDirectoryMirror(Microsoft.Extensions.Logging.Abstractions.NullLogger<AtomicDirectoryMirror>.Instance),
             new DefaultPathResolver(new FakeEnvironment()),
             new JsonConduitStateStore(Microsoft.Extensions.Logging.Abstractions.NullLogger<JsonConduitStateStore>.Instance),
+            StrategyTestHelper.BuildDefaultRegistry(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DefaultConduitSynchronizer>.Instance);
 
         var manifestPath = tmp.Combine("conduit.json");

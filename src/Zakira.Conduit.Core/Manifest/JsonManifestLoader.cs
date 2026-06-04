@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Zakira.Conduit.Paths;
 using Zakira.Conduit.Sources.Inference;
+using Zakira.Conduit.Strategies;
 
 namespace Zakira.Conduit.Manifest;
 
@@ -11,21 +12,31 @@ public sealed class JsonManifestLoader : IManifestLoader
 {
     private readonly SourceInferenceCoordinator? _inferenceCoordinator;
     private readonly IPathResolver? _pathResolver;
+    private readonly IPlanStrategyRegistry? _strategyRegistry;
 
     public JsonManifestLoader()
-        : this(inferenceCoordinator: null, pathResolver: null)
+        : this(inferenceCoordinator: null, pathResolver: null, strategyRegistry: null)
     {
     }
 
     public JsonManifestLoader(SourceInferenceCoordinator? inferenceCoordinator)
-        : this(inferenceCoordinator, pathResolver: null)
+        : this(inferenceCoordinator, pathResolver: null, strategyRegistry: null)
     {
     }
 
     public JsonManifestLoader(SourceInferenceCoordinator? inferenceCoordinator, IPathResolver? pathResolver)
+        : this(inferenceCoordinator, pathResolver, strategyRegistry: null)
+    {
+    }
+
+    public JsonManifestLoader(
+        SourceInferenceCoordinator? inferenceCoordinator,
+        IPathResolver? pathResolver,
+        IPlanStrategyRegistry? strategyRegistry)
     {
         _inferenceCoordinator = inferenceCoordinator;
         _pathResolver = pathResolver;
+        _strategyRegistry = strategyRegistry;
     }
 
     /// <inheritdoc />
@@ -74,15 +85,15 @@ public sealed class JsonManifestLoader : IManifestLoader
         }
 
         // Static (no-IO) structural validation first.
-        var errors = new List<string>(ManifestValidator.Validate(manifest));
+        var errors = new List<string>(ManifestValidator.Validate(manifest, _strategyRegistry));
 
         // Resolved-path validation: catches collisions the static check
         // misses because it doesn't expand '~', env vars, or relative paths.
         // Skipped when no IPathResolver is registered (library consumers
         // building their own pipeline are responsible for path resolution).
-        if (_pathResolver is not null)
+        if (_pathResolver is not null && _strategyRegistry is not null)
         {
-            var resolvedValidator = new ResolvedDestinationValidator(_pathResolver);
+            var resolvedValidator = new ResolvedDestinationValidator(_pathResolver, _strategyRegistry);
             foreach (var error in resolvedValidator.Validate(manifest, path))
             {
                 errors.Add(error);

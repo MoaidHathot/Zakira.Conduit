@@ -61,6 +61,8 @@ public static class Program
         serviceCollection.AddSingleton<WatchCommandHandler>();
         serviceCollection.AddSingleton<StatusCommandHandler>();
         serviceCollection.AddSingleton<CleanCommandHandler>();
+        serviceCollection.AddSingleton<CopyCommandHandler>();
+        serviceCollection.AddSingleton<SkillsProbeCommandHandler>();
 
         return serviceCollection.BuildServiceProvider();
     }
