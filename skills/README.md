@@ -8,7 +8,16 @@ Each subdirectory of `skills/` is an [agent skill](https://agentskills.io/) &mda
 
 ## Using these skills
 
-The skills here are themselves designed to be mirrored via `conduit`. From your manifest:
+The skills here are themselves designed to be mirrored via `conduit`. The simplest manifest entry is just the bare URL:
+
+```jsonc
+{
+  "source": "https://github.com/MoaidHathot/Zakira.Conduit/skills/zakira-conduit",
+  "targets": [ "~/.config/agents/skills" ]
+}
+```
+
+That tracks the default branch and lands the skill at `~/.config/agents/skills/Zakira.Conduit/` (the destination folder is derived from the repo name). Use the explicit object form when you need to set `branch`, `commit`, `include`/`exclude`, or an entry-level `name`:
 
 ```jsonc
 {
@@ -19,13 +28,11 @@ The skills here are themselves designed to be mirrored via `conduit`. From your 
     "path": "skills/zakira-conduit",
     "branch": "main"
   },
-  "targets": [
-    "~/.config/agents/skills"
-  ]
+  "targets": [ "~/.config/agents/skills" ]
 }
 ```
 
-After `conduit sync`, your agent's skill folder gains a `zakira-conduit/` subdirectory containing the full skill (`SKILL.md` + `references/` + `assets/`).
+After `conduit sync`, your agent's skill folder gains a `zakira-conduit/` (or `Zakira.Conduit/`) subdirectory containing the full skill (`SKILL.md` + `references/` + `assets/`).
 
 ## Layout
 

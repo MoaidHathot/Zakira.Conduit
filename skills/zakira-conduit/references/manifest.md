@@ -47,7 +47,15 @@ Every field accepted by a `conduit.json` manifest. The runtime validator (`Manif
 
 ## Source object
 
-Discriminator field `type` selects one of:
+The `source` field accepts a polymorphic shape. The discriminator `type` selects the concrete kind, but several **shorthand forms** also work:
+
+- **Bare URI string**: `"source": "https://github.com/owner/repo/path"`. The URI inferrer picks the right kind from the shape (`github`, `azdo`, `local`).
+- **Bare URI string with alias suffix**: `"source": "https://github.com/owner/repo -> MyName"`. The trailing ` -> Name` overrides the entry's `name`.
+- **Wrapper object**: `{ "source": <any other source shape>, "as": "Name" }`. Equivalent to the in-string alias but works around any inner source shape (including concrete objects).
+- **Array**: `"source": [ ... ]`. Each element becomes its own sub-entry sharing the parent entry's `targets` / `description` / `disabled`. Per-target `as:` aliases are forbidden on arrays.
+- **`type: "uri"` object**: `{ "type": "uri", "uri": "...", "path"?: ..., "branch"?: ..., "auth"?: ..., ... }`. The inferrer rewrites it into the equivalent concrete kind at load time; useful when you need overrides on a pasted browse URL.
+
+Concrete kinds (`type` value):
 
 ### `type: "github"`
 
@@ -58,7 +66,11 @@ Discriminator field `type` selects one of:
   "path": "sub/path",
   "paths": [ "skills/a", { "path": "skills/b", "as": "renamed" } ],
   "branch": "main",
-  "commit": "abc123def..."
+  "commit": "abc123def...",
+  "include": ["**/*.md", "scripts/**"],
+  "exclude": ["**/*.test.*", "bin/**"],
+  "auth": ["env", "gh", "anonymous"],
+  "patEnv": "MY_GH_TOKEN"
 }
 ```
 
@@ -67,10 +79,67 @@ Discriminator field `type` selects one of:
 | `repo`   | yes      | Repository identifier. Accepts `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo[.git]`, or `git@github.com:owner/repo[.git]`. |
 | `path`   | no       | Single sub-path inside the repo. Mutually exclusive with `paths`. Must not begin with `/` or contain `..`. |
 | `paths`  | no       | Array of sub-paths. Mutually exclusive with `path`. Each element is either a string or an object `{ path, as? }`. Duplicate destination basenames across the array are a validation error. |
-| `branch` | no       | Branch or tag name. May coexist with `commit`: when both are set, `branch` is the tracking intent and `commit` is the snapshot fetched. |
+| `branch` | no       | Branch or tag name. May coexist with `commit`: when both are set, `branch` is the tracking intent and `commit` is the snapshot fetched. `conduit pin` removes `branch` when locking to a commit; `conduit unpin` restores it. |
 | `commit` | no       | Commit SHA. Wins over `branch` for fetching. |
+| `include`| no       | Optional glob list (Microsoft.Extensions.FileSystemGlobbing dialect: `*`, `**`, `?`, character classes). When omitted / empty, all files are mirrored. |
+| `exclude`| no       | Optional glob list applied after `include`. |
+| `auth`   | no       | Auth chain. Single mode name or an ordered array. Modes: `env`, `gh`, `pat`, `anonymous`. Default `[env, gh, anonymous]`. |
+| `patEnv` | no       | For the `pat` mode: the env var name to read the PAT from. Defaults to `CONDUIT_GITHUB_TOKEN`. |
 
 If neither `branch` nor `commit` is set, the repository's default branch is used. If neither `path` nor `paths` is set, the entire repository is mirrored.
+
+URL-embedded shorthands accepted by the inferrer when `source` is a string or `type: "uri"`:
+
+- `https://github.com/owner/repo`
+- `https://github.com/owner/repo/<sub-path>`                  (sub-path harvested; default branch)
+- `https://github.com/owner/repo/tree/<branch>/<sub-path>`    (branch harvested)
+- `https://github.com/owner/repo/tree/<sha>/<sub-path>`       (40-hex SHA -> routed to `commit` instead of `branch`)
+
+### `type: "azdo"`
+
+```jsonc
+{
+  "type": "azdo",
+  // Either 'url' OR the explicit triplet:
+  "url": "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
+  "organization": "contoso", "project": "Conduit", "repo": "agent-skills",
+  "baseUrl": "https://devops.contoso.internal/",   // for self-hosted AzDO Server
+  "path": "sub/path",
+  "paths": [ "skills/a", "skills/b" ],
+  "branch": "main",
+  "tag": "v1.2.3",
+  "commit": "abc...",
+  "include": ["**/*.md"],
+  "exclude": ["bin/**"],
+  "auth": ["env", "az"],
+  "patEnv": "MY_AZDO_TOKEN"
+}
+```
+
+| Field          | Required | Notes |
+|----------------|----------|-------|
+| `url`          | one of `url` / triplet | Browser URL or git remote (HTTPS or SSH form). Mutually exclusive with the triplet. |
+| `organization` | one of `url` / triplet | Org name (AzDO Cloud) or collection name (AzDO Server). |
+| `project`      | one of `url` / triplet | Project name. |
+| `repo`         | one of `url` / triplet | Repository name or GUID. |
+| `baseUrl`      | no | Override the REST base URL for AzDO Server. Defaults to `https://dev.azure.com/` for the triplet form. |
+| `branch`       | no | Branch name. May coexist with `commit` (branch = tracking intent). |
+| `tag`          | no | Tag name. Mutually exclusive with `branch`. |
+| `commit`       | no | Commit SHA pin. Wins over `branch` / `tag` for fetching. |
+| `path`         | no | Single sub-path inside the repo. Mutually exclusive with `paths`. |
+| `paths`        | no | Array of sub-paths. Same shape as the GitHub source. |
+| `include`      | no | Same as github. |
+| `exclude`      | no | Same as github. |
+| `auth`         | no | Auth chain. Modes: `env`, `az`, `pat`, `anonymous`. Default `[env, az]`. |
+| `patEnv`       | no | Env var name for the `pat` mode. Defaults to `CONDUIT_AZDO_TOKEN`. |
+
+URL-embedded shorthands accepted on string / `type: "uri"`:
+
+- `https://dev.azure.com/{org}/{project}/_git/{repo}`
+- `https://dev.azure.com/{org}/{project}/_git/{repo}/<sub-path>`
+- `https://dev.azure.com/{org}/{project}/_git/{repo}?path=/{sub-path}&version=GB{branch}`
+- `https://dev.azure.com/{org}/{project}/_git/{repo}?version=GC{sha}`   (`GC` = commit, `GB` = branch, `GT` = tag)
+- `https://{org}.visualstudio.com/{project}/_git/{repo}` and self-hosted variants
 
 ### `type: "local"`
 
@@ -78,14 +147,18 @@ If neither `branch` nor `commit` is set, the repository's default branch is used
 {
   "type": "local",
   "path": "./local-dir",
-  "paths": [ "./a", { "path": "./b", "as": "renamed" } ]
+  "paths": [ "./a", { "path": "./b", "as": "renamed" } ],
+  "include": ["**/*.md"],
+  "exclude": ["bin/**"]
 }
 ```
 
-| Field   | Required | Notes |
-|---------|----------|-------|
-| `path`  | one of `path` / `paths` | Single source directory. Mutually exclusive with `paths`. |
-| `paths` | one of `path` / `paths` | Array of source directories. Mutually exclusive with `path`. |
+| Field    | Required | Notes |
+|----------|----------|-------|
+| `path`   | one of `path` / `paths` | Single source directory. Mutually exclusive with `paths`. |
+| `paths`  | one of `path` / `paths` | Array of source directories. Mutually exclusive with `path`. |
+| `include`| no | Same as github. |
+| `exclude`| no | Same as github. |
 
 Local paths support `~`, `$VAR`, `${VAR}`, and `%VAR%` (Windows) expansion. Relative paths are anchored at the manifest's directory.
 
