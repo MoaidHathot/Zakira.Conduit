@@ -4,15 +4,15 @@ using Zakira.Conduit.Sources;
 namespace Zakira.Conduit.Core.UnitTests.TestHelpers;
 
 /// <summary>
-///     A pluggable <see cref="ISkillSourceFetcher"/> for tests. The fetcher
+///     A pluggable <see cref="ISourceFetcher"/> for tests. The fetcher
 ///     writes a set of files (provided by the caller) into a temp directory
 ///     and returns a <see cref="FetchedSource"/> that points at it.
 /// </summary>
-internal sealed class FakeFetcher : ISkillSourceFetcher
+internal sealed class FakeFetcher : ISourceFetcher
 {
     public string SourceKind { get; }
 
-    public Func<ISkillSource, IReadOnlyDictionary<string, string>> ContentProvider { get; set; }
+    public Func<ISource, IReadOnlyDictionary<string, string>> ContentProvider { get; set; }
 
     private int _fetchCount;
     public int FetchCount => Volatile.Read(ref _fetchCount);
@@ -23,7 +23,7 @@ internal sealed class FakeFetcher : ISkillSourceFetcher
         ContentProvider = _ => new Dictionary<string, string> { ["SKILL.md"] = "fake" };
     }
 
-    public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken cancellationToken = default)
+    public Task<FetchedSource> FetchAsync(ISource source, FetchContext context, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _fetchCount);
 
@@ -40,7 +40,7 @@ internal sealed class FakeFetcher : ISkillSourceFetcher
         return Task.FromResult(FetchedSource.FromSingleDirectory(
             contentDirectory: dir,
             source: source,
-            resolvedRef: source is GitHubSkillSource gh ? gh.ResolvedRef ?? "<default>" : null,
+            resolvedRef: source is GitHubSource gh ? gh.ResolvedRef ?? "<default>" : null,
             cleanup: () =>
             {
                 try

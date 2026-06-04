@@ -19,7 +19,7 @@ public interface IAzdoCredentialProvider
     ///     Attempts to acquire a credential. Returns <see langword="null"/>
     ///     when no credential is available from this provider.
     /// </summary>
-    Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSkillSource source, CancellationToken cancellationToken = default);
+    Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSource source, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

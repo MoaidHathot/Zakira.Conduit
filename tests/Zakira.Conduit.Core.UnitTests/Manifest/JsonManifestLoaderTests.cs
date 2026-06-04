@@ -41,7 +41,7 @@ public sealed class JsonManifestLoaderTests
         entry.Name.Should().Be("code-review");
         entry.Targets.Should().ContainSingle().Which.Path.Should().Be("~/.config/agents/skills");
 
-        var github = entry.Source.Should().BeOfType<GitHubSkillSource>().Subject;
+        var github = entry.Source.Should().BeOfType<GitHubSource>().Subject;
         github.Repo.Should().Be("anthropics/skills");
         github.Owner.Should().Be("anthropics");
         github.RepoName.Should().Be("skills");

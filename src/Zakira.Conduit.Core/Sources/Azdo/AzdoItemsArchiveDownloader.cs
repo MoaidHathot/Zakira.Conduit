@@ -38,7 +38,7 @@ public sealed class AzdoItemsArchiveDownloader : IAzdoItemsArchiveDownloader
 
     /// <inheritdoc />
     public async Task DownloadAsync(
-        AzdoSkillSource source,
+        AzdoSource source,
         string commitSha,
         string? scopePath,
         Stream destinationStream,

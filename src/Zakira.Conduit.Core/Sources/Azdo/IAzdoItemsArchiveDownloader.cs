@@ -14,7 +14,7 @@ public interface IAzdoItemsArchiveDownloader
     ///     is <see langword="null"/>/empty, the whole repository is downloaded.
     /// </summary>
     Task DownloadAsync(
-        AzdoSkillSource source,
+        AzdoSource source,
         string commitSha,
         string? scopePath,
         Stream destinationStream,

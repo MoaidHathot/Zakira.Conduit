@@ -131,7 +131,7 @@ public sealed class GitHubArchiveDownloaderTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddGitHubSkillSource(opts =>
+        services.AddGitHubSource(opts =>
         {
             opts.BaseAddress = server.BaseAddress;
             opts.Token = token;

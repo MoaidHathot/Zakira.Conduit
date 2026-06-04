@@ -18,7 +18,7 @@ public sealed class AtomicDirectoryMirror : IDirectoryMirror
     }
 
     /// <inheritdoc />
-    public async Task<int> MirrorAsync(string sourceDirectory, string targetDirectory, CancellationToken cancellationToken = default)
+    public async Task<int> MirrorAsync(string sourceDirectory, string targetDirectory, MirrorFilter? filter = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
@@ -39,7 +39,9 @@ public sealed class AtomicDirectoryMirror : IDirectoryMirror
         try
         {
             Directory.CreateDirectory(stagingDir);
-            var copied = await CopyDirectoryAsync(sourceDirectory, stagingDir, cancellationToken).ConfigureAwait(false);
+            var sourceRoot = Path.GetFullPath(sourceDirectory);
+            var effectiveFilter = filter ?? MirrorFilter.MatchEverything;
+            var copied = await CopyDirectoryAsync(sourceRoot, sourceRoot, stagingDir, effectiveFilter, cancellationToken).ConfigureAwait(false);
 
             // Swap: move current target aside, move staging into place, then delete the aside.
             string? aside = null;
@@ -84,9 +86,23 @@ public sealed class AtomicDirectoryMirror : IDirectoryMirror
         }
     }
 
-    private static async Task<int> CopyDirectoryAsync(string sourceDir, string destDir, CancellationToken cancellationToken)
+    private static async Task<int> CopyDirectoryAsync(
+        string sourceRoot,
+        string sourceDir,
+        string destDir,
+        MirrorFilter filter,
+        CancellationToken cancellationToken)
     {
-        Directory.CreateDirectory(destDir);
+        // Defer Directory.CreateDirectory(destDir) until we know at least one
+        // file actually lands in it; otherwise filters that exclude an entire
+        // subtree would leak empty mirror dirs. The caller pre-creates the
+        // top-level staging dir, so this only affects nested directories.
+        var ensureCreated = sourceDir == sourceRoot;
+        if (ensureCreated)
+        {
+            Directory.CreateDirectory(destDir);
+        }
+
         var count = 0;
 
         foreach (var entry in Directory.EnumerateFileSystemEntries(sourceDir, "*", SearchOption.TopDirectoryOnly))
@@ -97,10 +113,20 @@ public sealed class AtomicDirectoryMirror : IDirectoryMirror
 
             if (Directory.Exists(entry))
             {
-                count += await CopyDirectoryAsync(entry, destEntry, cancellationToken).ConfigureAwait(false);
+                count += await CopyDirectoryAsync(sourceRoot, entry, destEntry, filter, cancellationToken).ConfigureAwait(false);
             }
             else
             {
+                if (!filter.MatchesEverything && !filter.ShouldInclude(GetRelativePosixPath(sourceRoot, entry)))
+                {
+                    continue;
+                }
+
+                if (!ensureCreated && !Directory.Exists(destDir))
+                {
+                    Directory.CreateDirectory(destDir);
+                }
+
                 await using (var src = File.OpenRead(entry))
                 await using (var dst = File.Create(destEntry))
                 {
@@ -112,5 +138,11 @@ public sealed class AtomicDirectoryMirror : IDirectoryMirror
         }
 
         return count;
+    }
+
+    private static string GetRelativePosixPath(string sourceRoot, string absoluteFilePath)
+    {
+        var relative = Path.GetRelativePath(sourceRoot, absoluteFilePath);
+        return relative.Replace('\\', '/');
     }
 }

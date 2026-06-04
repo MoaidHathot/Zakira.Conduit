@@ -24,11 +24,12 @@ internal sealed class ValidateCommandHandler
     public async Task<int> InvokeAsync(string? manifest, OutputFormat output, CancellationToken cancellationToken)
     {
         string manifestPath;
+        ConduitManifest manifestModel;
         try
         {
             manifestPath = _locator.Locate(manifest);
             _logger.LogDebug("Validating manifest: {Path}", manifestPath);
-            _ = await _loader.LoadAsync(manifestPath, cancellationToken).ConfigureAwait(false);
+            manifestModel = await _loader.LoadAsync(manifestPath, cancellationToken).ConfigureAwait(false);
         }
         catch (ManifestException ex)
         {
@@ -38,7 +39,15 @@ internal sealed class ValidateCommandHandler
 
         if (output == OutputFormat.Json)
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(new { ok = true, manifest = manifestPath }, ManifestJson.WriteOptions);
+            var dto = new
+            {
+                ok = true,
+                manifest = manifestPath,
+                version = manifestModel.Version,
+                entries = manifestModel.Entries.Count,
+                errors = Array.Empty<string>(),
+            };
+            var json = System.Text.Json.JsonSerializer.Serialize(dto, ManifestJson.WriteOptions);
             Console.WriteLine(json);
         }
         else

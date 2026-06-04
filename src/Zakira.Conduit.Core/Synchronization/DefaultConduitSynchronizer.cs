@@ -18,14 +18,14 @@ namespace Zakira.Conduit.Synchronization;
 /// </summary>
 public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 {
-    private readonly ISkillSourceFetcherRegistry _fetchers;
+    private readonly ISourceFetcherRegistry _fetchers;
     private readonly IDirectoryMirror _mirror;
     private readonly IPathResolver _pathResolver;
     private readonly IConduitStateStore _stateStore;
     private readonly ILogger<DefaultConduitSynchronizer> _logger;
 
     public DefaultConduitSynchronizer(
-        ISkillSourceFetcherRegistry fetchers,
+        ISourceFetcherRegistry fetchers,
         IDirectoryMirror mirror,
         IPathResolver pathResolver,
         IConduitStateStore stateStore,
@@ -306,6 +306,8 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                     var resolvedParent = _pathResolver.Resolve(targetSpec.Path, manifestDir);
                     var resolvedTarget = Path.Combine(resolvedParent, destName);
 
+                    var mirrorFilter = BuildMirrorFilter(entry.Source);
+
                     try
                     {
                         GuardAgainstOverlap(fetchedFull, resolvedTarget);
@@ -314,13 +316,13 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                         {
                             _logger.LogInformation("[dry-run] Would mirror '{Source}' to '{Target}'", unit.ContentDirectory, resolvedTarget);
                             var fileCount = Directory.Exists(unit.ContentDirectory)
-                                ? Directory.EnumerateFiles(unit.ContentDirectory, "*", SearchOption.AllDirectories).Count()
+                                ? CountFilteredFiles(unit.ContentDirectory, mirrorFilter)
                                 : 0;
                             targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: fileCount, Error: null));
                         }
                         else
                         {
-                            var written = await _mirror.MirrorAsync(unit.ContentDirectory, resolvedTarget, cancellationToken).ConfigureAwait(false);
+                            var written = await _mirror.MirrorAsync(unit.ContentDirectory, resolvedTarget, mirrorFilter, cancellationToken).ConfigureAwait(false);
                             targetResults.Add(new SyncTargetResult(resolvedTarget, Succeeded: true, FilesWritten: written, Error: null));
                         }
                     }
@@ -345,7 +347,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                     Targets = targetResults.Select(t => t.TargetPath).Distinct(StringComparer.Ordinal).ToArray(),
                     // Local sources: record the just-computed content hash if we
                     // calculated one in CanShortCircuit, otherwise compute it now.
-                    SourceContentHash = entry.Source is LocalDirectorySkillSource local
+                    SourceContentHash = entry.Source is LocalDirectorySource local
                         ? (localSourceHash ?? ComputeLocalSourceHash(local, manifestDir))
                         : null,
                 });
@@ -389,7 +391,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
         switch (entry.Source)
         {
-            case GitHubSkillSource gh when !string.IsNullOrWhiteSpace(gh.Commit):
+            case GitHubSource gh when !string.IsNullOrWhiteSpace(gh.Commit):
                 if (!string.Equals(previousState.ResolvedRef, gh.Commit, StringComparison.Ordinal))
                 {
                     return false;
@@ -397,7 +399,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
                 return GithubExpectedTargetsExist(entry, gh, manifestDir, previousState);
 
-            case AzdoSkillSource azdo when !string.IsNullOrWhiteSpace(azdo.Commit):
+            case AzdoSource azdo when !string.IsNullOrWhiteSpace(azdo.Commit):
                 if (!string.Equals(previousState.ResolvedRef, azdo.Commit, StringComparison.Ordinal))
                 {
                     return false;
@@ -410,7 +412,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
 
                 return EveryConfiguredTargetExists(entry, manifestDir, previousState);
 
-            case LocalDirectorySkillSource local:
+            case LocalDirectorySource local:
                 currentSourceHash = ComputeLocalSourceHash(local, manifestDir);
                 if (currentSourceHash is null)
                 {
@@ -430,7 +432,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         }
     }
 
-    private bool GithubExpectedTargetsExist(ConduitEntry entry, GitHubSkillSource gh, string manifestDir, EntryState previousState)
+    private bool GithubExpectedTargetsExist(ConduitEntry entry, GitHubSource gh, string manifestDir, EntryState previousState)
     {
         // Multi-path sources can't be short-circuited cheaply because per-unit
         // destinations depend on basenames the fetcher would compute.
@@ -442,7 +444,7 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
         return EveryConfiguredTargetExists(entry, manifestDir, previousState);
     }
 
-    private bool LocalExpectedTargetsExist(ConduitEntry entry, LocalDirectorySkillSource local, string manifestDir, EntryState previousState)
+    private bool LocalExpectedTargetsExist(ConduitEntry entry, LocalDirectorySource local, string manifestDir, EntryState previousState)
     {
         if (local.EffectivePaths.Count > 1)
         {
@@ -468,12 +470,12 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
     }
 
     /// <summary>
-    ///     Walks every <see cref="LocalDirectorySkillSource"/> path and produces
+    ///     Walks every <see cref="LocalDirectorySource"/> path and produces
     ///     a deterministic hash of <c>(relative path, size, last-write-time)</c>
     ///     for every file it contains. Returns <see langword="null"/> when any
     ///     resolved source directory is missing.
     /// </summary>
-    private string? ComputeLocalSourceHash(LocalDirectorySkillSource source, string manifestDir)
+    private string? ComputeLocalSourceHash(LocalDirectorySource source, string manifestDir)
     {
         var sb = new StringBuilder();
 
@@ -539,5 +541,52 @@ public sealed class DefaultConduitSynchronizer : IConduitSynchronizer
                 $"Source directory '{fetchedFullPath}' overlaps with target directory '{targetFull}'. " +
                 "Choose a target that is not inside, nor a parent of, the source.");
         }
+    }
+
+    /// <summary>
+    ///     Builds the post-fetch <see cref="MirrorFilter"/> from the source's
+    ///     <c>include</c>/<c>exclude</c> patterns. Sources that don't supply
+    ///     either return <see cref="MirrorFilter.MatchEverything"/>.
+    /// </summary>
+    private static MirrorFilter BuildMirrorFilter(ISource source) =>
+        source switch
+        {
+            GitHubSource gh => MakeFilter(gh.Include, gh.Exclude),
+            AzdoSource azdo => MakeFilter(azdo.Include, azdo.Exclude),
+            LocalDirectorySource local => MakeFilter(local.Include, local.Exclude),
+            _ => MirrorFilter.MatchEverything,
+        };
+
+    private static MirrorFilter MakeFilter(IReadOnlyList<string>? include, IReadOnlyList<string>? exclude)
+    {
+        var hasInclude = include is { Count: > 0 };
+        var hasExclude = exclude is { Count: > 0 };
+        return hasInclude || hasExclude ? new MirrorFilter(include, exclude) : MirrorFilter.MatchEverything;
+    }
+
+    /// <summary>
+    ///     Counts how many files in a fetched content directory survive the
+    ///     supplied filter. Used by dry-run reporting so the number matches
+    ///     what a real sync would actually write.
+    /// </summary>
+    private static int CountFilteredFiles(string contentDirectory, MirrorFilter filter)
+    {
+        if (filter.MatchesEverything)
+        {
+            return Directory.EnumerateFiles(contentDirectory, "*", SearchOption.AllDirectories).Count();
+        }
+
+        var root = Path.GetFullPath(contentDirectory);
+        var count = 0;
+        foreach (var file in Directory.EnumerateFiles(contentDirectory, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(root, file).Replace('\\', '/');
+            if (filter.ShouldInclude(rel))
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 }

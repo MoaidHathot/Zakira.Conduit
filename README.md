@@ -36,7 +36,7 @@
 - **`conduit init --interactive`.** Walks first-time users through one starter entry instead of dropping a placeholder template.
 - **XDG-friendly discovery.** Drops `conduit.json` at `$XDG_CONFIG_HOME/Zakira.Conduit/`, with sensible fallbacks on every platform.
 - **Safety rails.** Refuses to run when a source path overlaps with one of its targets. Duplicate destination basenames in a multi-path entry are caught at validation time.
-- **Extensible.** `ISkillSource` + `ISkillSourceFetcher` are first-class abstractions; adding a new source kind is a single record + fetcher away.
+- **Extensible.** `ISource` + `ISourceFetcher` are first-class abstractions; adding a new source kind is a single record + fetcher away.
 - **Tested.** 180+ tests across unit, integration and end-to-end suites; the GitHub fetcher and ref resolver are exercised against an in-process HTTP mock. CI runs the suite on Linux, macOS and Windows.
 
 ---
@@ -653,7 +653,7 @@ See [`skills/README.md`](./skills/README.md) for details on the format and how t
                   for each entry:                |
                                                  v
                                        +------------------+
-                                       | SkillSourceFetcher|
+                                       | SourceFetcher|
                                        +--------+----------+
                                                 |  (GitHub zipball ->
                                                 |   stream -> temp dir,
@@ -686,8 +686,8 @@ Key properties of the mirror step:
 Implement two small types and register them with DI.
 
 ```csharp
-// 1. The manifest-shape: implement ISkillSource and register the discriminator.
-public sealed record GitLabSkillSource : ISkillSource
+// 1. The manifest-shape: implement ISource and register the discriminator.
+public sealed record GitLabSource : ISource
 {
     public const string TypeDiscriminator = "gitlab";
 
@@ -698,15 +698,15 @@ public sealed record GitLabSkillSource : ISkillSource
 }
 ```
 
-Add `[JsonDerivedType(typeof(GitLabSkillSource), GitLabSkillSource.TypeDiscriminator)]` on `ISkillSource`.
+Add `[JsonDerivedType(typeof(GitLabSource), GitLabSource.TypeDiscriminator)]` on `ISource`.
 
 ```csharp
 // 2. The fetcher: turn a source into a local content directory.
-public sealed class GitLabSkillSourceFetcher : ISkillSourceFetcher
+public sealed class GitLabSourceFetcher : ISourceFetcher
 {
-    public string SourceKind => GitLabSkillSource.TypeDiscriminator;
+    public string SourceKind => GitLabSource.TypeDiscriminator;
 
-    public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken ct = default)
+    public Task<FetchedSource> FetchAsync(ISource source, FetchContext context, CancellationToken ct = default)
     {
         // `context.ManifestDirectory` lets you resolve any path-shaped fields
         // in the source relative to the manifest, mirroring how the local
@@ -721,7 +721,7 @@ Register it:
 
 ```csharp
 services.AddConduitCore();
-services.AddSingleton<ISkillSourceFetcher, GitLabSkillSourceFetcher>();
+services.AddSingleton<ISourceFetcher, GitLabSourceFetcher>();
 ```
 
 The synchronizer and mirror are source-agnostic, so that's all that's needed.

@@ -61,9 +61,9 @@ internal sealed class ListCommandHandler
             var status = entry.Disabled ? _style.Yellow(" (disabled)") : string.Empty;
             var sourceSummary = entry.Source switch
             {
-                GitHubSkillSource gh => SummarizeGitHub(gh),
-                LocalDirectorySkillSource local => SummarizeLocal(local),
-                AzdoSkillSource azdo => SummarizeAzdo(azdo),
+                GitHubSource gh => SummarizeGitHub(gh),
+                LocalDirectorySource local => SummarizeLocal(local),
+                AzdoSource azdo => SummarizeAzdo(azdo),
                 _ => entry.Source.Kind,
             };
 
@@ -103,7 +103,7 @@ internal sealed class ListCommandHandler
         Console.WriteLine(json);
     }
 
-    private static string SummarizeGitHub(GitHubSkillSource gh)
+    private static string SummarizeGitHub(GitHubSource gh)
     {
         var refPart = gh.Commit is not null ? $"@{gh.Commit}"
             : gh.Branch is not null ? $"@{gh.Branch}"
@@ -120,7 +120,7 @@ internal sealed class ListCommandHandler
         return $"github:{gh.Slug}{pathPart}{refPart}";
     }
 
-    private static string SummarizeLocal(LocalDirectorySkillSource local)
+    private static string SummarizeLocal(LocalDirectorySource local)
     {
         var paths = local.EffectivePaths;
         return paths.Count switch
@@ -134,7 +134,7 @@ internal sealed class ListCommandHandler
     private static string FormatPathSpec(PathSpec spec) =>
         string.IsNullOrWhiteSpace(spec.As) ? spec.Path : $"{spec.Path} as {spec.As}";
 
-    private static string SummarizeAzdo(AzdoSkillSource azdo)
+    private static string SummarizeAzdo(AzdoSource azdo)
     {
         var refPart = azdo.Commit is not null ? $"@{azdo.Commit}"
             : azdo.Tag is not null ? $"@tag:{azdo.Tag}"

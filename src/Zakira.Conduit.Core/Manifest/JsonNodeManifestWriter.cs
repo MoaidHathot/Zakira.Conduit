@@ -84,4 +84,60 @@ public sealed class JsonNodeManifestWriter : IManifestWriter
 
         return backupPath;
     }
+
+    /// <inheritdoc />
+    public async Task<(bool Patched, string? BackupPath)> ReplaceStringLeavesAsync(
+        string manifestPath,
+        IReadOnlyList<JsonValuePatcher.StringEdit> edits,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+        ArgumentNullException.ThrowIfNull(edits);
+
+        if (edits.Count == 0)
+        {
+            return (false, null);
+        }
+
+        if (!File.Exists(manifestPath))
+        {
+            throw new ManifestException($"Manifest file not found: '{manifestPath}'.", manifestPath);
+        }
+
+        var fullPath = Path.GetFullPath(manifestPath);
+        var directory = Path.GetDirectoryName(fullPath)
+                        ?? throw new ArgumentException("Manifest path has no parent directory.", nameof(manifestPath));
+
+        var sourceBytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
+        var patched = JsonValuePatcher.TryPatch(sourceBytes, edits);
+        if (patched is null)
+        {
+            return (false, null);
+        }
+
+        // Bytes are unchanged when every requested value already equalled its
+        // proposed new value. Skip the disk write so we don't churn timestamps
+        // for a no-op pin/update.
+        if (patched.Length == sourceBytes.Length && patched.AsSpan().SequenceEqual(sourceBytes))
+        {
+            return (true, null);
+        }
+
+        var backupPath = fullPath + BackupSuffix;
+        File.Copy(fullPath, backupPath, overwrite: true);
+
+        var tempPath = Path.Combine(directory, $".{Path.GetFileName(fullPath)}.tmp-{Guid.NewGuid():N}");
+        try
+        {
+            await File.WriteAllBytesAsync(tempPath, patched, cancellationToken).ConfigureAwait(false);
+            File.Move(tempPath, fullPath, overwrite: true);
+        }
+        catch
+        {
+            try { if (File.Exists(tempPath)) { File.Delete(tempPath); } } catch { /* best-effort */ }
+            throw;
+        }
+
+        return (true, backupPath);
+    }
 }

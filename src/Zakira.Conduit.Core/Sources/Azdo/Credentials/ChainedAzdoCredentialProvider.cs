@@ -7,7 +7,7 @@ namespace Zakira.Conduit.Sources.Azdo.Credentials;
 /// <summary>
 ///     Walks an ordered list of <see cref="IAzdoCredentialProvider"/>s and
 ///     returns the first non-null credential. Resolves the chain at call-time
-///     against <see cref="AzdoSkillSource.ResolvedAuthChain"/>, so the
+///     against <see cref="AzdoSource.ResolvedAuthChain"/>, so the
 ///     manifest can configure the order per-entry.
 /// </summary>
 public sealed class ChainedAzdoCredentialProvider
@@ -32,7 +32,7 @@ public sealed class ChainedAzdoCredentialProvider
     /// <exception cref="InvalidOperationException">
     ///     When the source references an unknown auth mode.
     /// </exception>
-    public async Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSkillSource source, CancellationToken cancellationToken = default)
+    public async Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSource source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
 

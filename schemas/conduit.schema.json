@@ -128,7 +128,25 @@
         "commit": {
           "type": "string",
           "description": "Commit SHA. When both 'branch' and 'commit' are present, 'commit' wins for fetching; 'branch' is retained as the refresh intent."
-        }
+        },
+        "auth": {
+          "oneOf": [
+            { "type": "string", "enum": ["env", "gh", "pat", "anonymous"] },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "enum": ["env", "gh", "pat", "anonymous"] }
+            }
+          ],
+          "description": "Auth chain for github. Default when omitted: [env, gh, anonymous]."
+        },
+        "patEnv": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Env var name to read a PAT from when using the 'pat' auth mode. Defaults to CONDUIT_GITHUB_TOKEN."
+        },
+        "include": { "$ref": "#/$defs/globPatterns" },
+        "exclude": { "$ref": "#/$defs/globPatterns" }
       },
       "not": {
         "required": ["path", "paths"]
@@ -150,7 +168,9 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/pathOrAliased" },
           "description": "Multiple source directories. Mutually exclusive with 'path'."
-        }
+        },
+        "include": { "$ref": "#/$defs/globPatterns" },
+        "exclude": { "$ref": "#/$defs/globPatterns" }
       },
       "anyOf": [
         { "required": ["path"] },
@@ -210,7 +230,9 @@
           "type": "string",
           "minLength": 1,
           "description": "Env var name to read a PAT from when using the 'pat' auth mode. Defaults to CONDUIT_AZDO_TOKEN."
-        }
+        },
+        "include": { "$ref": "#/$defs/globPatterns" },
+        "exclude": { "$ref": "#/$defs/globPatterns" }
       },
       "oneOf": [
         { "required": ["url"] },
@@ -253,8 +275,16 @@
           ],
           "description": "Forwarded to source kinds that support it (currently: azdo)."
         },
-        "patEnv": { "type": "string", "minLength": 1 }
+        "patEnv": { "type": "string", "minLength": 1 },
+        "include": { "$ref": "#/$defs/globPatterns" },
+        "exclude": { "$ref": "#/$defs/globPatterns" }
       }
+    },
+    "globPatterns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "List of file-relative glob patterns (Microsoft.Extensions.FileSystemGlobbing dialect: '*', '**', '?', bracket classes). For 'include' an empty/omitted list means 'include everything'; for 'exclude' an empty/omitted list means 'exclude nothing'."
     }
   }
 }

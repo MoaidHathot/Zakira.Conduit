@@ -7,7 +7,7 @@ using Zakira.Conduit.Synchronization;
 namespace Zakira.Conduit.IntegrationTests;
 
 /// <summary>
-///     Synchronizer + real <see cref="Sources.GitHub.GitHubSkillSourceFetcher"/>
+///     Synchronizer + real <see cref="Sources.GitHub.GitHubSourceFetcher"/>
 ///     against a local HTTP mock, covering the full download \u2192 extract \u2192
 ///     mirror pipeline.
 /// </summary>
@@ -36,7 +36,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "review",
-                    Source = new GitHubSkillSource
+                    Source = new GitHubSource
                     {
                         Repo = "acme/skills",
                         Path = "skills/review",
@@ -98,7 +98,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "skills",
-                    Source = new GitHubSkillSource { Repo = "acme/skills", Branch = "v1" },
+                    Source = new GitHubSource { Repo = "acme/skills", Branch = "v1" },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -110,7 +110,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "skills",
-                    Source = new GitHubSkillSource { Repo = "acme/skills", Branch = "v2" },
+                    Source = new GitHubSource { Repo = "acme/skills", Branch = "v2" },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -152,7 +152,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "anthropic-bundle",
-                    Source = new GitHubSkillSource
+                    Source = new GitHubSource
                     {
                         Repo = "acme/skills",
                         Paths = ["skills/review", "skills/tests", "skills/refactor"],
@@ -199,7 +199,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "house-bundle",
-                    Source = new LocalDirectorySkillSource
+                    Source = new LocalDirectorySource
                     {
                         Paths = ["./vendor/code-review", "./vendor/test-writer"],
                     },
@@ -244,7 +244,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "demo",
-                    Source = new GitHubSkillSource { Repo = "acme/skills" },
+                    Source = new GitHubSource { Repo = "acme/skills" },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -291,7 +291,7 @@ public sealed class EndToEndSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "bundle",
-                    Source = new GitHubSkillSource
+                    Source = new GitHubSource
                     {
                         Repo = "acme/skills",
                         Paths =

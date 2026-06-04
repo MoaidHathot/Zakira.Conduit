@@ -34,7 +34,7 @@ public sealed class GitHubRefResolver : IGitHubRefResolver
     }
 
     /// <inheritdoc />
-    public async Task<string> ResolveAsync(string owner, string repo, string gitRef, CancellationToken cancellationToken = default)
+    public async Task<string> ResolveAsync(string owner, string repo, string gitRef, AuthenticationHeaderValue? authHeader = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentException.ThrowIfNullOrWhiteSpace(repo);
@@ -47,7 +47,12 @@ public sealed class GitHubRefResolver : IGitHubRefResolver
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
 
-        if (!string.IsNullOrWhiteSpace(_options.Token))
+        // Caller-resolved auth wins; options.Token is the legacy fallback.
+        if (authHeader is not null)
+        {
+            request.Headers.Authorization = authHeader;
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.Token))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.Token);
         }

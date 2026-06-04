@@ -3,7 +3,7 @@ using Zakira.Conduit.Manifest;
 namespace Zakira.Conduit.Sources.Inference;
 
 /// <summary>
-///     Derives a default destination name from a concrete <see cref="ISkillSource"/>
+///     Derives a default destination name from a concrete <see cref="ISource"/>
 ///     when the manifest author did not supply <c>entry.name</c> and did not
 ///     supply an explicit alias (in-string <c> -&gt; Name</c> or
 ///     <c>{ "source": ..., "as": "Name" }</c> wrapper).
@@ -24,16 +24,16 @@ public static class DefaultSourceNameDeriver
     ///     case the validator surfaces a friendly error telling the author to
     ///     supply <c>name</c> or an explicit alias).
     /// </summary>
-    public static string? Derive(ISkillSource source) => source switch
+    public static string? Derive(ISource source) => source switch
     {
-        GitHubSkillSource gh => NullIfBlank(gh.RepoName),
-        AzdoSkillSource azdo => NullIfBlank(azdo.ResolvedComponents.Repo),
-        LocalDirectorySkillSource local => DeriveLocal(local),
-        AliasedSkillSource aliased => aliased.As,
+        GitHubSource gh => NullIfBlank(gh.RepoName),
+        AzdoSource azdo => NullIfBlank(azdo.ResolvedComponents.Repo),
+        LocalDirectorySource local => DeriveLocal(local),
+        AliasedSource aliased => aliased.As,
         _ => null,
     };
 
-    private static string? DeriveLocal(LocalDirectorySkillSource local)
+    private static string? DeriveLocal(LocalDirectorySource local)
     {
         var paths = local.EffectivePaths;
         if (paths.Count == 0)

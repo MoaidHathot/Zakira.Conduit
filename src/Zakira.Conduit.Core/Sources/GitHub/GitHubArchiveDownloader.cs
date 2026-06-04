@@ -39,6 +39,7 @@ public sealed class GitHubArchiveDownloader : IGitHubArchiveDownloader
         string? gitRef,
         Stream destinationStream,
         string? ifNoneMatchEtag = null,
+        AuthenticationHeaderValue? authHeader = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
@@ -53,7 +54,12 @@ public sealed class GitHubArchiveDownloader : IGitHubArchiveDownloader
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
 
-        if (!string.IsNullOrWhiteSpace(_options.Token))
+        // Caller-resolved auth wins; options.Token is the legacy fallback.
+        if (authHeader is not null)
+        {
+            request.Headers.Authorization = authHeader;
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.Token))
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.Token);
         }

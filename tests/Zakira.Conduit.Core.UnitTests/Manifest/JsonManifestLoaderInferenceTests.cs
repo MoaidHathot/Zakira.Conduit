@@ -9,11 +9,11 @@ public sealed class JsonManifestLoaderInferenceTests
     private static readonly string[] AzAuth = { "az" };
 
     private static JsonManifestLoader BuildLoader() =>
-        new(new SkillSourceInferenceCoordinator(new ISkillSourceInferrer[]
+        new(new SourceInferenceCoordinator(new ISourceInferrer[]
         {
-            new LocalDirectorySkillSourceInferrer(),
-            new GitHubSkillSourceInferrer(),
-            new AzdoSkillSourceInferrer(),
+            new LocalDirectorySourceInferrer(),
+            new GitHubSourceInferrer(),
+            new AzdoSourceInferrer(),
         }));
 
     [Fact]
@@ -49,13 +49,13 @@ public sealed class JsonManifestLoaderInferenceTests
         var loader = BuildLoader();
         var manifest = await loader.LoadAsync(path);
 
-        manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>();
-        manifest.Entries[1].Source.Should().BeOfType<AzdoSkillSource>();
-        manifest.Entries[2].Source.Should().BeOfType<LocalDirectorySkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<GitHubSource>();
+        manifest.Entries[1].Source.Should().BeOfType<AzdoSource>();
+        manifest.Entries[2].Source.Should().BeOfType<LocalDirectorySource>();
 
-        ((GitHubSkillSource)manifest.Entries[0].Source).Branch.Should().Be("main");
-        ((AzdoSkillSource)manifest.Entries[1].Source).Auth.Should().BeEquivalentTo(AzAuth);
-        ((LocalDirectorySkillSource)manifest.Entries[2].Source).Path.Should().Be("./local-skill-sample");
+        ((GitHubSource)manifest.Entries[0].Source).Branch.Should().Be("main");
+        ((AzdoSource)manifest.Entries[1].Source).Auth.Should().BeEquivalentTo(AzAuth);
+        ((LocalDirectorySource)manifest.Entries[2].Source).Path.Should().Be("./local-skill-sample");
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class JsonManifestLoaderInferenceTests
 
         var loader = new JsonManifestLoader();
         var manifest = await loader.LoadAsync(path);
-        manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<GitHubSource>();
     }
 
     [Fact]
@@ -131,9 +131,9 @@ public sealed class JsonManifestLoaderInferenceTests
         var loader = BuildLoader();
         var manifest = await loader.LoadAsync(path);
 
-        manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>();
-        manifest.Entries[1].Source.Should().BeOfType<AzdoSkillSource>();
-        manifest.Entries[2].Source.Should().BeOfType<LocalDirectorySkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<GitHubSource>();
+        manifest.Entries[1].Source.Should().BeOfType<AzdoSource>();
+        manifest.Entries[2].Source.Should().BeOfType<LocalDirectorySource>();
     }
 
     [Fact]
@@ -209,12 +209,12 @@ public sealed class JsonManifestLoaderInferenceTests
         manifest.Entries.Select(e => e.Name).Should().OnlyHaveUniqueItems();
         manifest.Entries.Should().AllSatisfy(e => e.Name.Should().StartWith("bundle-"));
 
-        manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>();
-        ((GitHubSkillSource)manifest.Entries[0].Source).Path.Should().Be("skills");
-        ((GitHubSkillSource)manifest.Entries[0].Source).Repo.Should().Be("foo/bar");
+        manifest.Entries[0].Source.Should().BeOfType<GitHubSource>();
+        ((GitHubSource)manifest.Entries[0].Source).Path.Should().Be("skills");
+        ((GitHubSource)manifest.Entries[0].Source).Repo.Should().Be("foo/bar");
 
-        manifest.Entries[1].Source.Should().BeOfType<GitHubSkillSource>();
-        manifest.Entries[2].Source.Should().BeOfType<LocalDirectorySkillSource>();
+        manifest.Entries[1].Source.Should().BeOfType<GitHubSource>();
+        manifest.Entries[2].Source.Should().BeOfType<LocalDirectorySource>();
     }
 
     [Fact]
@@ -244,8 +244,8 @@ public sealed class JsonManifestLoaderInferenceTests
         var manifest = await loader.LoadAsync(path);
 
         manifest.Entries.Should().HaveCount(2);
-        manifest.Entries.Should().AllSatisfy(e => e.Source.Should().BeOfType<GitHubSkillSource>());
-        ((GitHubSkillSource)manifest.Entries[1].Source).Branch.Should().Be("main");
+        manifest.Entries.Should().AllSatisfy(e => e.Source.Should().BeOfType<GitHubSource>());
+        ((GitHubSource)manifest.Entries[1].Source).Branch.Should().Be("main");
     }
 
     [Fact]

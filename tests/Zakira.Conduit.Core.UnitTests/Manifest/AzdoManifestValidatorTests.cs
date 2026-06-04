@@ -6,7 +6,7 @@ public sealed class AzdoManifestValidatorTests
 {
     private static readonly string[] AuthEnvBogus = { "env", "bogus" };
 
-    private static ConduitManifest Wrap(AzdoSkillSource source, string name = "ok") =>
+    private static ConduitManifest Wrap(AzdoSource source, string name = "ok") =>
         new()
         {
             Entries =
@@ -23,7 +23,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Url_form_is_accepted()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
             Branch = "main",
@@ -35,7 +35,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Triplet_form_is_accepted()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Organization = "contoso",
             Project = "Conduit",
@@ -49,7 +49,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Url_and_triplet_together_are_rejected()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
             Organization = "contoso",
@@ -64,14 +64,14 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Missing_url_and_triplet_is_rejected()
     {
-        var m = Wrap(new AzdoSkillSource { Branch = "main" });
+        var m = Wrap(new AzdoSource { Branch = "main" });
         ManifestValidator.Validate(m).Should().ContainMatch("*provide either*");
     }
 
     [Fact]
     public void Branch_and_tag_together_are_rejected()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
             Branch = "main",
@@ -84,7 +84,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Branch_and_commit_together_are_allowed()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
             Branch = "main",
@@ -97,7 +97,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Unknown_auth_mode_is_rejected()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
             Branch = "main",
@@ -110,7 +110,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Invalid_url_is_rejected()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "not-a-url",
             Branch = "main",
@@ -122,7 +122,7 @@ public sealed class AzdoManifestValidatorTests
     [Fact]
     public void Sub_path_with_dotdot_is_rejected()
     {
-        var m = Wrap(new AzdoSkillSource
+        var m = Wrap(new AzdoSource
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",
             Branch = "main",

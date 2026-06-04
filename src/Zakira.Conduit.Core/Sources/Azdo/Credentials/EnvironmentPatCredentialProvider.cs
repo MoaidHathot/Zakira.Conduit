@@ -34,7 +34,7 @@ public sealed class EnvironmentPatCredentialProvider : IAzdoCredentialProvider
     public string Mode => "env";
 
     /// <inheritdoc />
-    public Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSkillSource source, CancellationToken cancellationToken = default)
+    public Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSource source, CancellationToken cancellationToken = default)
     {
         foreach (var name in CandidateVars)
         {

@@ -14,7 +14,7 @@ public sealed class AzdoCredentialProviderTests
     private static readonly string[] AuthBogus = { "bogus" };
     private static readonly string[] AuthAnonymousEnv = { "anonymous", "env" };
 
-    private static AzdoSkillSource Source(string[]? auth = null, string? patEnv = null) =>
+    private static AzdoSource Source(string[]? auth = null, string? patEnv = null) =>
         new()
         {
             Url = "https://dev.azure.com/contoso/Conduit/_git/agent-skills",

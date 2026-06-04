@@ -10,12 +10,12 @@ public sealed class DefaultNameAndCollisionTests
     private static readonly string[] ChildrenWithArrowAlias = { "CustomAV", "PowerReview" };
     private static readonly string[] ChildrenWithWrapperAlias = { "ActVw", "PowerReview" };
 
-    private static SkillSourceInferenceCoordinator BuildCoordinator() =>
-        new(new ISkillSourceInferrer[]
+    private static SourceInferenceCoordinator BuildCoordinator() =>
+        new(new ISourceInferrer[]
         {
-            new LocalDirectorySkillSourceInferrer(),
-            new GitHubSkillSourceInferrer(),
-            new AzdoSkillSourceInferrer(),
+            new LocalDirectorySourceInferrer(),
+            new GitHubSourceInferrer(),
+            new AzdoSourceInferrer(),
         });
 
     private static ConduitManifest Rewrite(string json) =>
@@ -41,7 +41,7 @@ public sealed class DefaultNameAndCollisionTests
 
         var manifest = Rewrite(json);
         manifest.Entries[0].Name.Should().Be("ActionView");
-        var gh = manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>().Subject;
+        var gh = manifest.Entries[0].Source.Should().BeOfType<GitHubSource>().Subject;
         gh.Path.Should().Be("skills");
         gh.Branch.Should().Be("main");
     }
@@ -62,7 +62,7 @@ public sealed class DefaultNameAndCollisionTests
 
         var manifest = Rewrite(json);
         manifest.Entries[0].Name.Should().Be("my-local-skill");
-        manifest.Entries[0].Source.Should().BeOfType<LocalDirectorySkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<LocalDirectorySource>();
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class DefaultNameAndCollisionTests
 
         var manifest = Rewrite(json);
         manifest.Entries[0].Name.Should().Be("agent-skills");
-        manifest.Entries[0].Source.Should().BeOfType<AzdoSkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<AzdoSource>();
     }
 
     [Fact]
@@ -206,13 +206,13 @@ public sealed class DefaultNameAndCollisionTests
                 new ConduitEntry
                 {
                     Name = "shared",
-                    Source = new GitHubSkillSource { Repo = "owner/repo1" },
+                    Source = new GitHubSource { Repo = "owner/repo1" },
                     Targets = [new PathSpec("./out")],
                 },
                 new ConduitEntry
                 {
                     Name = "shared",
-                    Source = new GitHubSkillSource { Repo = "owner/repo2" },
+                    Source = new GitHubSource { Repo = "owner/repo2" },
                     Targets = [new PathSpec("./out")],
                 },
             ],
@@ -258,13 +258,13 @@ public sealed class DefaultNameAndCollisionTests
                 new ConduitEntry
                 {
                     Name = "first",
-                    Source = new GitHubSkillSource { Repo = "owner/repo1" },
+                    Source = new GitHubSource { Repo = "owner/repo1" },
                     Targets = [new PathSpec("./out", "Shared")],
                 },
                 new ConduitEntry
                 {
                     Name = "second",
-                    Source = new GitHubSkillSource { Repo = "owner/repo2" },
+                    Source = new GitHubSource { Repo = "owner/repo2" },
                     Targets = [new PathSpec("./out", "Shared")],
                 },
             ],
@@ -286,13 +286,13 @@ public sealed class DefaultNameAndCollisionTests
                 new ConduitEntry
                 {
                     Name = "first",
-                    Source = new GitHubSkillSource { Repo = "owner/repo1" },
+                    Source = new GitHubSource { Repo = "owner/repo1" },
                     Targets = [new PathSpec(@".\out\")],
                 },
                 new ConduitEntry
                 {
                     Name = "second",
-                    Source = new GitHubSkillSource { Repo = "owner/repo2" },
+                    Source = new GitHubSource { Repo = "owner/repo2" },
                     Targets = [new PathSpec("./out", "first")],
                 },
             ],

@@ -41,7 +41,7 @@ public sealed class AzdoRefResolver : IAzdoRefResolver
     }
 
     /// <inheritdoc />
-    public async Task<string> ResolveAsync(AzdoSkillSource source, string refValue, string refKind, CancellationToken cancellationToken = default)
+    public async Task<string> ResolveAsync(AzdoSource source, string refValue, string refKind, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(refValue);

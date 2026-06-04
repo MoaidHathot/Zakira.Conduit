@@ -1,0 +1,45 @@
+using Zakira.Conduit.Manifest;
+using Zakira.Conduit.Sources;
+
+namespace Zakira.Conduit.Core.UnitTests.Sources;
+
+public sealed class DefaultSourceFetcherRegistryTests
+{
+    private sealed class StubFetcher(string kind) : ISourceFetcher
+    {
+        public string SourceKind => kind;
+
+        public Task<FetchedSource> FetchAsync(ISource source, FetchContext context, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+    }
+
+    [Fact]
+    public void Resolves_fetcher_by_kind()
+    {
+        var fetcher = new StubFetcher("github");
+        var registry = new DefaultSourceFetcherRegistry([fetcher]);
+
+        registry.GetFetcher(new GitHubSource { Repo = "o/r" }).Should().BeSameAs(fetcher);
+    }
+
+    [Fact]
+    public void Throws_when_two_fetchers_share_a_kind()
+    {
+        var act = () => new DefaultSourceFetcherRegistry([new StubFetcher("github"), new StubFetcher("github")]);
+        act.Should().Throw<InvalidOperationException>().WithMessage("*github*");
+    }
+
+    [Fact]
+    public void Throws_when_unknown_kind_is_requested()
+    {
+        var registry = new DefaultSourceFetcherRegistry([new StubFetcher("github")]);
+
+        var act = () => registry.GetFetcher(new UnknownSource());
+        act.Should().Throw<NotSupportedException>().WithMessage("*unknown*");
+    }
+
+    private sealed record UnknownSource : ISource
+    {
+        public string Kind => "unknown";
+    }
+}

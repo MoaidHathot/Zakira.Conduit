@@ -16,7 +16,7 @@ namespace Zakira.Conduit.Manifest;
 ///         <item><description>
 ///             A bare URI shorthand string
 ///             (<c>"https://github.com/owner/repo"</c>); deserialised into a
-///             <see cref="UriBasedSkillSource"/> and later resolved by the
+///             <see cref="UriBasedSource"/> and later resolved by the
 ///             inference coordinator.
 ///         </description></item>
 ///         <item><description>
@@ -40,13 +40,13 @@ namespace Zakira.Conduit.Manifest;
 ///         </description></item>
 ///     </list>
 ///     <para>
-///         On write the converter round-trips <see cref="AliasedSkillSource"/>
+///         On write the converter round-trips <see cref="AliasedSource"/>
 ///         back into its object-wrapper JSON shape, and delegates every other
 ///         concrete kind to the polymorphic serialiser by removing itself from
 ///         a sibling <see cref="JsonSerializerOptions"/> instance.
 ///     </para>
 /// </summary>
-public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
+public sealed class SourceShorthandJsonConverter : JsonConverter<ISource>
 {
     /// <summary>The literal separator used by the in-string alias suffix.</summary>
     private const string ArrowSeparator = " -> ";
@@ -61,7 +61,7 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
         "^[A-Za-z0-9._-]+$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    public override ISkillSource? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override ISource? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         switch (reader.TokenType)
         {
@@ -82,7 +82,7 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
         }
     }
 
-    private static ISkillSource ReadStringShorthand(ref Utf8JsonReader reader)
+    private static ISource ReadStringShorthand(ref Utf8JsonReader reader)
     {
         var s = reader.GetString();
         if (string.IsNullOrWhiteSpace(s))
@@ -107,20 +107,20 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
                         "Source shorthand string must have a non-empty URI before the ' -> ' alias suffix.");
                 }
 
-                return new AliasedSkillSource
+                return new AliasedSource
                 {
-                    Inner = new UriBasedSkillSource { Uri = leftUri },
+                    Inner = new UriBasedSource { Uri = leftUri },
                     As = candidateAlias,
                 };
             }
         }
 
-        return new UriBasedSkillSource { Uri = s };
+        return new UriBasedSource { Uri = s };
     }
 
-    private ArraySkillSource ReadArray(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    private ArraySource ReadArray(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        var elements = new List<ISkillSource>();
+        var elements = new List<ISource>();
         while (reader.Read())
         {
             if (reader.TokenType == JsonTokenType.EndArray)
@@ -130,7 +130,7 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
                     throw new JsonException("'source' array must not be empty.");
                 }
 
-                return new ArraySkillSource { Elements = elements };
+                return new ArraySource { Elements = elements };
             }
 
             // Recurse on each element. Re-entering this converter is fine: we
@@ -143,7 +143,7 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
                 throw new JsonException("'source' array elements must not be null.");
             }
 
-            if (element is ArraySkillSource)
+            if (element is ArraySource)
             {
                 throw new JsonException("'source' array elements must not themselves be arrays.");
             }
@@ -154,7 +154,7 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
         throw new JsonException("Unexpected end of JSON while reading 'source' array.");
     }
 
-    private static ISkillSource? ReadObject(ref Utf8JsonReader reader, JsonSerializerOptions options)
+    private static ISource? ReadObject(ref Utf8JsonReader reader, JsonSerializerOptions options)
     {
         // Buffer the object so we can peek for the wrapper shape without
         // consuming the reader twice. Manifests are small, so the extra
@@ -175,10 +175,10 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
         // deserialiser via a sibling options instance that doesn't include
         // this converter (otherwise we'd recurse infinitely).
         var fallback = WithoutThisConverter(options);
-        return root.Deserialize<ISkillSource>(fallback);
+        return root.Deserialize<ISource>(fallback);
     }
 
-    private static AliasedSkillSource ReadWrapper(JsonElement root, JsonElement sourceProp, JsonSerializerOptions options)
+    private static AliasedSource ReadWrapper(JsonElement root, JsonElement sourceProp, JsonSerializerOptions options)
     {
         if (!root.TryGetProperty("as", out var asProp))
         {
@@ -219,12 +219,12 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
 
         // Deserialise the inner 'source' through this converter (allows the
         // inner source to itself be a shorthand string, concrete object, etc.).
-        // We can't reuse JsonElement.Deserialize<ISkillSource> with this
-        // converter in options because ISkillSource is also polymorphism-
+        // We can't reuse JsonElement.Deserialize<ISource> with this
+        // converter in options because ISource is also polymorphism-
         // attributed and the framework rejects the combination (the base
         // converter doesn't opt-in to polymorphism metadata). Instead we round-
         // trip the element through a fresh Utf8JsonReader and re-enter Read.
-        ISkillSource? innerSource;
+        ISource? innerSource;
         try
         {
             innerSource = DeserializeInner(sourceProp, options);
@@ -243,24 +243,24 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
             throw new JsonException("Source wrapper 'source' must not be null.");
         }
 
-        if (innerSource is AliasedSkillSource)
+        if (innerSource is AliasedSource)
         {
             throw new JsonException(
                 "Source wrapper 'source' must not itself be another aliased wrapper; " +
                 "only one alias may apply per source.");
         }
 
-        if (innerSource is ArraySkillSource)
+        if (innerSource is ArraySource)
         {
             throw new JsonException(
                 "Source wrapper 'source' must not be an array; " +
                 "aliases apply to single sources only.");
         }
 
-        return new AliasedSkillSource { Inner = innerSource, As = alias! };
+        return new AliasedSource { Inner = innerSource, As = alias! };
     }
 
-    public override void Write(Utf8JsonWriter writer, ISkillSource value, JsonSerializerOptions options)
+    public override void Write(Utf8JsonWriter writer, ISource value, JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(value);
@@ -269,7 +269,7 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
         // Normal pipelines unwrap these before serialisation, but supporting
         // it keeps the converter symmetric (and helps any external tool that
         // re-emits a freshly-parsed pre-inference manifest).
-        if (value is AliasedSkillSource aliased)
+        if (value is AliasedSource aliased)
         {
             writer.WriteStartObject();
             writer.WritePropertyName("source");
@@ -281,10 +281,10 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
 
         // Concrete kinds: delegate to the polymorphic serialiser. Serialise as
         // the base type so the framework writes the 'type' discriminator from
-        // [JsonDerivedType] on ISkillSource. Writing as value.GetType() would
+        // [JsonDerivedType] on ISource. Writing as value.GetType() would
         // emit the concrete subtype with no discriminator and break re-reads.
         var fallback = WithoutThisConverter(options);
-        JsonSerializer.Serialize<ISkillSource>(writer, value, fallback);
+        JsonSerializer.Serialize<ISource>(writer, value, fallback);
     }
 
     private static JsonSerializerOptions WithoutThisConverter(JsonSerializerOptions options)
@@ -326,11 +326,11 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
     /// <summary>
     ///     Re-enters <see cref="Read"/> on an inner <see cref="JsonElement"/>
     ///     by round-tripping it through a fresh <see cref="Utf8JsonReader"/>.
-    ///     This is necessary because <c>JsonElement.Deserialize&lt;ISkillSource&gt;</c>
+    ///     This is necessary because <c>JsonElement.Deserialize&lt;ISource&gt;</c>
     ///     conflicts with the framework's polymorphism handling when this
     ///     converter is added to <see cref="JsonSerializerOptions.Converters"/>.
     /// </summary>
-    private static ISkillSource? DeserializeInner(JsonElement element, JsonSerializerOptions options)
+    private static ISource? DeserializeInner(JsonElement element, JsonSerializerOptions options)
     {
         // GetRawText returns canonical JSON for the element. UTF-8 encode and
         // hand the bytes to a fresh reader; advance once so the reader is
@@ -344,6 +344,6 @@ public sealed class SourceShorthandJsonConverter : JsonConverter<ISkillSource>
         }
 
         var instance = new SourceShorthandJsonConverter();
-        return instance.Read(ref reader, typeof(ISkillSource), options);
+        return instance.Read(ref reader, typeof(ISource), options);
     }
 }

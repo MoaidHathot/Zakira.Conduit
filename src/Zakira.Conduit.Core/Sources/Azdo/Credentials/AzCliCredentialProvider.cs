@@ -44,7 +44,7 @@ public sealed class AzCliCredentialProvider : IAzdoCredentialProvider
     public string Mode => "az";
 
     /// <inheritdoc />
-    public async Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSkillSource source, CancellationToken cancellationToken = default)
+    public async Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSource source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
 

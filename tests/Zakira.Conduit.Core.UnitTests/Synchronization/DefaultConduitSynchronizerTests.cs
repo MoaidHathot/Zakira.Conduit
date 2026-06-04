@@ -15,7 +15,7 @@ public sealed class DefaultConduitSynchronizerTests
     private static (DefaultConduitSynchronizer synchronizer, FakeFetcher fetcher, FakeEnvironment env) Build()
     {
         var fetcher = new FakeFetcher();
-        var registry = new DefaultSkillSourceFetcherRegistry([fetcher]);
+        var registry = new DefaultSourceFetcherRegistry([fetcher]);
         var mirror = new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance);
         var env = new FakeEnvironment();
         var resolver = new DefaultPathResolver(env);
@@ -45,7 +45,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "alpha",
-                    Source = new GitHubSkillSource { Repo = "o/r" },
+                    Source = new GitHubSource { Repo = "o/r" },
                     Targets = [tmp.Combine("targetA"), tmp.Combine("targetB")],
                 }
             ],
@@ -76,7 +76,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "alpha",
-                    Source = new GitHubSkillSource { Repo = "o/r" },
+                    Source = new GitHubSource { Repo = "o/r" },
                     Targets = [tmp.Combine("target")],
                 }
             ],
@@ -102,7 +102,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "skipme",
-                    Source = new GitHubSkillSource { Repo = "o/r" },
+                    Source = new GitHubSource { Repo = "o/r" },
                     Targets = [tmp.Combine("t")],
                     Disabled = true,
                 }
@@ -128,8 +128,8 @@ public sealed class DefaultConduitSynchronizerTests
         {
             Entries =
             [
-                new ConduitEntry { Name = "alpha", Source = new GitHubSkillSource { Repo = "o/r" }, Targets = [tmp.Combine("t")] },
-                new ConduitEntry { Name = "beta",  Source = new GitHubSkillSource { Repo = "o/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "alpha", Source = new GitHubSource { Repo = "o/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "beta",  Source = new GitHubSource { Repo = "o/r" }, Targets = [tmp.Combine("t")] },
             ],
         };
 
@@ -148,7 +148,7 @@ public sealed class DefaultConduitSynchronizerTests
     {
         using var tmp = new TempDir();
         var fetcher = new ThrowingFetcher();
-        var registry = new DefaultSkillSourceFetcherRegistry([fetcher]);
+        var registry = new DefaultSourceFetcherRegistry([fetcher]);
         var mirror = new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance);
         var env = new FakeEnvironment();
         var resolver = new DefaultPathResolver(env);
@@ -158,8 +158,8 @@ public sealed class DefaultConduitSynchronizerTests
         {
             Entries =
             [
-                new ConduitEntry { Name = "fails", Source = new GitHubSkillSource { Repo = "boom/r" }, Targets = [tmp.Combine("t")] },
-                new ConduitEntry { Name = "ok",    Source = new GitHubSkillSource { Repo = "o/r" },    Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "fails", Source = new GitHubSource { Repo = "boom/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "ok",    Source = new GitHubSource { Repo = "o/r" },    Targets = [tmp.Combine("t")] },
             ],
         };
 
@@ -180,7 +180,7 @@ public sealed class DefaultConduitSynchronizerTests
     {
         using var tmp = new TempDir();
         var fetcher = new ThrowingFetcher();
-        var registry = new DefaultSkillSourceFetcherRegistry([fetcher]);
+        var registry = new DefaultSourceFetcherRegistry([fetcher]);
         var sync = new DefaultConduitSynchronizer(
             registry,
             new AtomicDirectoryMirror(NullLogger<AtomicDirectoryMirror>.Instance),
@@ -192,8 +192,8 @@ public sealed class DefaultConduitSynchronizerTests
         {
             Entries =
             [
-                new ConduitEntry { Name = "fails", Source = new GitHubSkillSource { Repo = "boom/r" }, Targets = [tmp.Combine("t")] },
-                new ConduitEntry { Name = "ok",    Source = new GitHubSkillSource { Repo = "o/r" },    Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "fails", Source = new GitHubSource { Repo = "boom/r" }, Targets = [tmp.Combine("t")] },
+                new ConduitEntry { Name = "ok",    Source = new GitHubSource { Repo = "o/r" },    Targets = [tmp.Combine("t")] },
             ],
         };
 
@@ -228,7 +228,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "pinned",
-                    Source = new GitHubSkillSource { Repo = "o/r", Commit = pinnedCommit },
+                    Source = new GitHubSource { Repo = "o/r", Commit = pinnedCommit },
                     Targets = [tmp.Combine("target")],
                 }
             ],
@@ -262,7 +262,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "pinned",
-                    Source = new GitHubSkillSource { Repo = "o/r", Commit = "abc1234567890abcdef1234567890abcdef12345" },
+                    Source = new GitHubSource { Repo = "o/r", Commit = "abc1234567890abcdef1234567890abcdef12345" },
                     Targets = [tmp.Combine("target")],
                 }
             ],
@@ -292,7 +292,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "pinned",
-                    Source = new GitHubSkillSource { Repo = "o/r", Commit = "abc1234567890abcdef1234567890abcdef12345" },
+                    Source = new GitHubSource { Repo = "o/r", Commit = "abc1234567890abcdef1234567890abcdef12345" },
                     Targets = [tmp.Combine("target")],
                 }
             ],
@@ -328,7 +328,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "local",
-                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Source = new LocalDirectorySource { Path = sourceDir },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -367,7 +367,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "local",
-                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Source = new LocalDirectorySource { Path = sourceDir },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -412,7 +412,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "local",
-                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Source = new LocalDirectorySource { Path = sourceDir },
                     Targets = [tmp.Combine("dest")],
                 }
             ],
@@ -445,7 +445,7 @@ public sealed class DefaultConduitSynchronizerTests
         var entries = Enumerable.Range(0, 8).Select(i => new ConduitEntry
         {
             Name = $"e{i}",
-            Source = new GitHubSkillSource { Repo = $"o/r{i}" },
+            Source = new GitHubSource { Repo = $"o/r{i}" },
             Targets = [tmp.Combine("t")],
         }).ToArray();
 
@@ -480,7 +480,7 @@ public sealed class DefaultConduitSynchronizerTests
                 new ConduitEntry
                 {
                     Name = "originalName",
-                    Source = new GitHubSkillSource { Repo = "o/r" },
+                    Source = new GitHubSource { Repo = "o/r" },
                     Targets =
                     [
                         new PathSpec(tmp.Combine("t1")),                                  // no alias -> originalName
@@ -510,7 +510,7 @@ public sealed class DefaultConduitSynchronizerTests
 
         // Force the fake fetcher to "fetch" by pointing the resulting content
         // at the same directory the user is trying to target.
-        var registry = new DefaultSkillSourceFetcherRegistry([new InPlaceFetcher(sourceDir)]);
+        var registry = new DefaultSourceFetcherRegistry([new InPlaceFetcher(sourceDir)]);
         var sync = new DefaultConduitSynchronizer(
             registry,
             new AtomicDirectoryMirror(Microsoft.Extensions.Logging.Abstractions.NullLogger<AtomicDirectoryMirror>.Instance),
@@ -529,7 +529,7 @@ public sealed class DefaultConduitSynchronizerTests
                 {
                     // Target = parent of source, with entry name = "src" -> target+name == source dir.
                     Name = "src",
-                    Source = new GitHubSkillSource { Repo = "o/r" },
+                    Source = new GitHubSource { Repo = "o/r" },
                     Targets = [tmp.Path],
                 }
             ],
@@ -545,21 +545,21 @@ public sealed class DefaultConduitSynchronizerTests
     ///     A fetcher that ignores the source and returns a fixed local directory.
     ///     Used to set up the overlap-guard test without going through the GitHub fetcher.
     /// </summary>
-    private sealed class InPlaceFetcher(string directory) : ISkillSourceFetcher
+    private sealed class InPlaceFetcher(string directory) : ISourceFetcher
     {
         public string SourceKind => "github";
 
-        public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken cancellationToken = default) =>
+        public Task<FetchedSource> FetchAsync(ISource source, FetchContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(FetchedSource.FromSingleDirectory(directory, source, resolvedRef: null, cleanup: null));
     }
 
-    private sealed class ThrowingFetcher : ISkillSourceFetcher
+    private sealed class ThrowingFetcher : ISourceFetcher
     {
         public string SourceKind => "github";
 
-        public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken cancellationToken = default)
+        public Task<FetchedSource> FetchAsync(ISource source, FetchContext context, CancellationToken cancellationToken = default)
         {
-            if (source is GitHubSkillSource gh && gh.Owner == "boom")
+            if (source is GitHubSource gh && gh.Owner == "boom")
             {
                 throw new InvalidOperationException("boom");
             }

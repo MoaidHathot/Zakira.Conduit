@@ -15,7 +15,7 @@ public sealed record ConduitEntry
     ///     <c>&lt;target&gt;/&lt;name&gt;/</c> directory).
     ///     <para>
     ///         Optional in the manifest. When omitted, the
-    ///         <see cref="Sources.Inference.SkillSourceInferenceCoordinator"/>
+    ///         <see cref="Sources.Inference.SourceInferenceCoordinator"/>
     ///         derives a default name from the source (GitHub/AzDO repo name,
     ///         local directory basename, etc.). May also be supplied indirectly
     ///         via the in-string arrow shorthand
@@ -39,13 +39,13 @@ public sealed record ConduitEntry
     ///         For ergonomics the JSON value may also be a bare string
     ///         (e.g. <c>"https://github.com/owner/repo"</c> or <c>"./skills"</c>),
     ///         in which case it is deserialised as a
-    ///         <see cref="UriBasedSkillSource"/> and resolved to its concrete
+    ///         <see cref="UriBasedSource"/> and resolved to its concrete
     ///         kind by the inference coordinator at manifest load time.
     ///     </para>
     /// </summary>
     [JsonPropertyName("source")]
     [JsonConverter(typeof(SourceShorthandJsonConverter))]
-    public required ISkillSource Source { get; init; }
+    public required ISource Source { get; init; }
 
     /// <summary>
     ///     One or more local target directories into which a sub-directory

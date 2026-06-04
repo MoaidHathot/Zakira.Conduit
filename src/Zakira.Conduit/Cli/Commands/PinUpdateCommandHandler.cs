@@ -20,6 +20,7 @@ internal sealed class PinUpdateCommandHandler
     private readonly IManifestLoader _loader;
     private readonly IManifestWriter _writer;
     private readonly IGitHubRefResolver _refResolver;
+    private readonly Sources.GitHub.Credentials.ChainedGitHubCredentialProvider _ghCredentials;
     private readonly IAzdoRefResolver _azdoRefResolver;
     private readonly ConsoleStyle _style;
     private readonly ILogger<PinUpdateCommandHandler> _logger;
@@ -29,6 +30,7 @@ internal sealed class PinUpdateCommandHandler
         IManifestLoader loader,
         IManifestWriter writer,
         IGitHubRefResolver refResolver,
+        Sources.GitHub.Credentials.ChainedGitHubCredentialProvider ghCredentials,
         IAzdoRefResolver azdoRefResolver,
         ConsoleStyle style,
         ILogger<PinUpdateCommandHandler> logger)
@@ -37,6 +39,7 @@ internal sealed class PinUpdateCommandHandler
         _loader = loader;
         _writer = writer;
         _refResolver = refResolver;
+        _ghCredentials = ghCredentials;
         _azdoRefResolver = azdoRefResolver;
         _style = style;
         _logger = logger;
@@ -74,7 +77,7 @@ internal sealed class PinUpdateCommandHandler
                 continue;
             }
 
-            if (entry.Source is GitHubSkillSource gh)
+            if (entry.Source is GitHubSource gh)
             {
                 if (string.IsNullOrWhiteSpace(gh.Branch))
                 {
@@ -84,7 +87,8 @@ internal sealed class PinUpdateCommandHandler
 
                 try
                 {
-                    var newSha = await _refResolver.ResolveAsync(gh.Owner, gh.RepoName, gh.Branch, cancellationToken).ConfigureAwait(false);
+                    var authHeader = await _ghCredentials.TryGetAsync(gh, cancellationToken).ConfigureAwait(false);
+                    var newSha = await _refResolver.ResolveAsync(gh.Owner, gh.RepoName, gh.Branch, authHeader, cancellationToken).ConfigureAwait(false);
                     var oldCommit = gh.Commit ?? string.Empty;
 
                     if (string.Equals(oldCommit, newSha, StringComparison.OrdinalIgnoreCase))
@@ -104,7 +108,7 @@ internal sealed class PinUpdateCommandHandler
                 continue;
             }
 
-            if (entry.Source is AzdoSkillSource azdo)
+            if (entry.Source is AzdoSource azdo)
             {
                 var intentValue = !string.IsNullOrWhiteSpace(azdo.Branch) ? azdo.Branch :
                                   !string.IsNullOrWhiteSpace(azdo.Tag) ? azdo.Tag : null;
@@ -150,32 +154,55 @@ internal sealed class PinUpdateCommandHandler
             // entries cheaply by walking the JSON tree once.
             var newCommitByName = updates.ToDictionary(u => u.Name, u => u.NewCommit, StringComparer.OrdinalIgnoreCase);
 
-            backupPath = await _writer.RewriteAsync(manifestPath, root =>
+            // First try the trivia-preserving surgical patch: walks the file
+            // text and replaces each affected `commit` leaf in-place,
+            // keeping comments / trailing commas / formatting intact. This
+            // only works when every target entry already has a `commit`
+            // field; if any is missing we need to insert one, which the
+            // patcher refuses to do, and we fall back to the full rewrite.
+            var leafEdits = BuildLeafEdits(manifestPath, newCommitByName, cancellationToken);
+            if (leafEdits is not null)
             {
-                if (root["entries"] is not JsonArray entriesArray)
+                var (patched, surgicalBackup) = await _writer.ReplaceStringLeavesAsync(manifestPath, leafEdits, cancellationToken).ConfigureAwait(false);
+                if (patched)
                 {
-                    return;
+                    backupPath = surgicalBackup;
                 }
-
-                foreach (var node in entriesArray)
+                else
                 {
-                    if (node is not JsonObject entryObj)
-                    {
-                        continue;
-                    }
-
-                    var name = entryObj["name"]?.GetValue<string>();
-                    if (string.IsNullOrEmpty(name) || !newCommitByName.TryGetValue(name, out var newSha))
-                    {
-                        continue;
-                    }
-
-                    if (entryObj["source"] is JsonObject sourceObj)
-                    {
-                        sourceObj["commit"] = newSha;
-                    }
+                    leafEdits = null; // fall through to full rewrite
                 }
-            }, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (leafEdits is null)
+            {
+                backupPath = await _writer.RewriteAsync(manifestPath, root =>
+                {
+                    if (root["entries"] is not JsonArray entriesArray)
+                    {
+                        return;
+                    }
+
+                    foreach (var node in entriesArray)
+                    {
+                        if (node is not JsonObject entryObj)
+                        {
+                            continue;
+                        }
+
+                        var name = entryObj["name"]?.GetValue<string>();
+                        if (string.IsNullOrEmpty(name) || !newCommitByName.TryGetValue(name, out var newSha))
+                        {
+                            continue;
+                        }
+
+                        if (entryObj["source"] is JsonObject sourceObj)
+                        {
+                            sourceObj["commit"] = newSha;
+                        }
+                    }
+                }, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         RenderReport(verb, manifestPath, backupPath, updates, skipped, errors, dryRun, output);
@@ -238,10 +265,88 @@ internal sealed class PinUpdateCommandHandler
                 Console.WriteLine($"  {_style.Dim($"Backup of the original manifest: {backupPath}")}");
             }
 
-            Console.WriteLine($"  {_style.Yellow("Note: pin/update reformat the manifest. Comments and trailing commas in the source file are lost.")}");
+            Console.WriteLine($"  {_style.Dim("Note: pin/update prefers a surgical in-place edit that preserves comments and trailing commas. A full reformat is only used as a fallback when the surgical patch can't be applied (typically when a 'commit' field needs to be inserted rather than replaced).")}");
         }
     }
 
     private static string Shorten(string sha) =>
         string.IsNullOrEmpty(sha) || sha.Length <= 12 ? sha : sha[..12];
+
+    /// <summary>
+    ///     Builds the surgical leaf-edit list <see cref="IManifestWriter.ReplaceStringLeavesAsync"/>
+    ///     consumes. Returns <see langword="null"/> when we can't safely
+    ///     compute the disk index for an updated entry (e.g. malformed file,
+    ///     or array-source expansion confounds index mapping); callers fall
+    ///     back to the full <c>RewriteAsync</c> path.
+    /// </summary>
+    private static List<JsonValuePatcher.StringEdit>? BuildLeafEdits(
+        string manifestPath,
+        Dictionary<string, string> newCommitByName,
+        CancellationToken cancellationToken)
+    {
+        Dictionary<string, int>? indexByName;
+        try
+        {
+            indexByName = TryMapDiskIndices(manifestPath);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            return null;
+        }
+
+        if (indexByName is null)
+        {
+            return null;
+        }
+
+        var edits = new List<JsonValuePatcher.StringEdit>(newCommitByName.Count);
+        foreach (var (name, newSha) in newCommitByName)
+        {
+            if (!indexByName.TryGetValue(name, out var idx))
+            {
+                // Entry referenced in updates but not present in the on-disk
+                // JSON file under that name. Could happen if the in-memory
+                // manifest was produced by array-source expansion (where the
+                // synthesized child name doesn't exist in the file). Bail
+                // out so the full rewrite path handles it correctly.
+                return null;
+            }
+
+            edits.Add(new JsonValuePatcher.StringEdit($"entries[{idx}].source.commit", newSha));
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        return edits;
+    }
+
+    /// <summary>
+    ///     Reads the manifest file and maps every named entry to its index
+    ///     in the on-disk <c>entries</c> array. Returns <see langword="null"/>
+    ///     when the file isn't a JSON object or has no <c>entries</c> array.
+    /// </summary>
+    private static Dictionary<string, int>? TryMapDiskIndices(string manifestPath)
+    {
+        var raw = File.ReadAllText(manifestPath);
+        var node = JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true,
+        });
+
+        if (node is not JsonObject root || root["entries"] is not JsonArray entries)
+        {
+            return null;
+        }
+
+        var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i] is JsonObject obj && obj["name"]?.GetValue<string>() is { Length: > 0 } name)
+            {
+                map[name] = i;
+            }
+        }
+
+        return map;
+    }
 }

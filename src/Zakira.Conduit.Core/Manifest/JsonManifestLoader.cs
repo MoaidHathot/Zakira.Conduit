@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Zakira.Conduit.Paths;
 using Zakira.Conduit.Sources.Inference;
 
 namespace Zakira.Conduit.Manifest;
@@ -8,16 +9,23 @@ namespace Zakira.Conduit.Manifest;
 /// </summary>
 public sealed class JsonManifestLoader : IManifestLoader
 {
-    private readonly SkillSourceInferenceCoordinator? _inferenceCoordinator;
+    private readonly SourceInferenceCoordinator? _inferenceCoordinator;
+    private readonly IPathResolver? _pathResolver;
 
     public JsonManifestLoader()
-        : this(null)
+        : this(inferenceCoordinator: null, pathResolver: null)
     {
     }
 
-    public JsonManifestLoader(SkillSourceInferenceCoordinator? inferenceCoordinator)
+    public JsonManifestLoader(SourceInferenceCoordinator? inferenceCoordinator)
+        : this(inferenceCoordinator, pathResolver: null)
+    {
+    }
+
+    public JsonManifestLoader(SourceInferenceCoordinator? inferenceCoordinator, IPathResolver? pathResolver)
     {
         _inferenceCoordinator = inferenceCoordinator;
+        _pathResolver = pathResolver;
     }
 
     /// <inheritdoc />
@@ -52,20 +60,35 @@ public sealed class JsonManifestLoader : IManifestLoader
         }
 
         // Resolve any 'uri'-shaped sources into their concrete kinds before
-        // validation runs. The validator never sees a UriBasedSkillSource.
+        // validation runs. The validator never sees a UriBasedSource.
         if (_inferenceCoordinator is not null)
         {
             try
             {
                 manifest = _inferenceCoordinator.Rewrite(manifest);
             }
-            catch (SkillSourceInferenceException ex)
+            catch (SourceInferenceException ex)
             {
                 throw new ManifestException($"Manifest file '{path}' has a source that could not be inferred: {ex.Message}", path, innerException: ex);
             }
         }
 
-        var errors = ManifestValidator.Validate(manifest);
+        // Static (no-IO) structural validation first.
+        var errors = new List<string>(ManifestValidator.Validate(manifest));
+
+        // Resolved-path validation: catches collisions the static check
+        // misses because it doesn't expand '~', env vars, or relative paths.
+        // Skipped when no IPathResolver is registered (library consumers
+        // building their own pipeline are responsible for path resolution).
+        if (_pathResolver is not null)
+        {
+            var resolvedValidator = new ResolvedDestinationValidator(_pathResolver);
+            foreach (var error in resolvedValidator.Validate(manifest, path))
+            {
+                errors.Add(error);
+            }
+        }
+
         if (errors.Count > 0)
         {
             throw new ManifestException($"Manifest file '{path}' failed validation.", path, errors);

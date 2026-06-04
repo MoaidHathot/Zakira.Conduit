@@ -38,10 +38,10 @@ Console.WriteLine(report.Succeeded ? "ok" : "had failures");
 
 | Namespace | Public types |
 |---|---|
-| `Zakira.Conduit.Manifest` | `ConduitManifest`, `ConduitEntry`, `ISkillSource`, `GitHubSkillSource`, `LocalDirectorySkillSource`, `IManifestLoader`, `IManifestLocator`, `ManifestValidator`, `ManifestException` |
-| `Zakira.Conduit.Sources` | `ISkillSourceFetcher`, `ISkillSourceFetcherRegistry`, `FetchedSource`, `FetchedContent`, `FetchContext` |
-| `Zakira.Conduit.Sources.GitHub` | `GitHubSkillSourceFetcher`, `IGitHubArchiveDownloader`, `GitHubFetcherOptions`, `GitHubDownloadException` |
-| `Zakira.Conduit.Sources.Local` | `LocalDirectorySkillSourceFetcher`, `LocalSourceNotFoundException` |
+| `Zakira.Conduit.Manifest` | `ConduitManifest`, `ConduitEntry`, `ISource`, `GitHubSource`, `LocalDirectorySource`, `IManifestLoader`, `IManifestLocator`, `ManifestValidator`, `ManifestException` |
+| `Zakira.Conduit.Sources` | `ISourceFetcher`, `ISourceFetcherRegistry`, `FetchedSource`, `FetchedContent`, `FetchContext` |
+| `Zakira.Conduit.Sources.GitHub` | `GitHubSourceFetcher`, `IGitHubArchiveDownloader`, `GitHubFetcherOptions`, `GitHubDownloadException` |
+| `Zakira.Conduit.Sources.Local` | `LocalDirectorySourceFetcher`, `LocalSourceNotFoundException` |
 | `Zakira.Conduit.Synchronization` | `IConduitSynchronizer`, `SyncOptions`, `SyncReport`, `SyncEntryResult`, `SyncTargetResult` |
 | `Zakira.Conduit.Mirroring` | `IDirectoryMirror`, `AtomicDirectoryMirror` |
 | `Zakira.Conduit.Paths` | `IPathResolver`, `DefaultPathResolver` |
@@ -53,7 +53,7 @@ Console.WriteLine(report.Succeeded ? "ok" : "had failures");
 Implement two small types and register them with DI:
 
 ```csharp
-public sealed record GitLabSkillSource : ISkillSource
+public sealed record GitLabSource : ISource
 {
     public const string TypeDiscriminator = "gitlab";
     [JsonPropertyName("project")] public required string Project { get; init; }
@@ -61,21 +61,21 @@ public sealed record GitLabSkillSource : ISkillSource
     [JsonIgnore] public string Kind => TypeDiscriminator;
 }
 
-public sealed class GitLabSkillSourceFetcher : ISkillSourceFetcher
+public sealed class GitLabSourceFetcher : ISourceFetcher
 {
-    public string SourceKind => GitLabSkillSource.TypeDiscriminator;
+    public string SourceKind => GitLabSource.TypeDiscriminator;
 
-    public Task<FetchedSource> FetchAsync(ISkillSource source, FetchContext context, CancellationToken ct = default)
+    public Task<FetchedSource> FetchAsync(ISource source, FetchContext context, CancellationToken ct = default)
     {
         // ... download zip, extract to a temp dir, return a FetchedSource ...
     }
 }
 ```
 
-Then register the discriminator on `ISkillSource` (`[JsonDerivedType]`) and the fetcher with DI:
+Then register the discriminator on `ISource` (`[JsonDerivedType]`) and the fetcher with DI:
 
 ```csharp
-services.AddSingleton<ISkillSourceFetcher, GitLabSkillSourceFetcher>();
+services.AddSingleton<ISourceFetcher, GitLabSourceFetcher>();
 ```
 
 The synchronizer and mirror are source-agnostic, so no further wiring is needed.

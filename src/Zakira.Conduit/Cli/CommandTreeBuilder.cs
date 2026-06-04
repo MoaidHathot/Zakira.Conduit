@@ -32,6 +32,7 @@ internal static class CommandTreeBuilder
         root.Subcommands.Add(BuildPinOrUpdateCommand(services, "update", "Alias of 'pin'. Refresh each pinned entry to the latest SHA on its tracked branch."));
         root.Subcommands.Add(BuildWatchCommand(services));
         root.Subcommands.Add(BuildStatusCommand(services));
+        root.Subcommands.Add(BuildCleanCommand(services));
 
         // Default action when the user runs `conduit` with no subcommand: show help.
         root.SetAction(parseResult =>
@@ -49,7 +50,7 @@ internal static class CommandTreeBuilder
     {
         var entryOption = new Option<string[]>("--entry", "-e")
         {
-            Description = "Sync only the named entry (repeatable). When omitted, all enabled entries are synced.",
+            Description = "Sync only the named entry. Repeatable, and comma-separated values are accepted (e.g. '--entry a,b -e c'). When omitted, all enabled entries are synced.",
             AllowMultipleArgumentsPerToken = true,
         };
 
@@ -74,23 +75,37 @@ internal static class CommandTreeBuilder
             DefaultValueFactory = _ => 4,
         };
 
+        var pruneOption = new Option<bool>("--prune")
+        {
+            Description = "After a successful sync, run the orphan cleaner: remove destination directories whose owning entry has been deleted from the manifest. Requires --prune-yes (or --yes) for non-interactive runs.",
+        };
+
+        var pruneYesOption = new Option<bool>("--prune-yes")
+        {
+            Description = "Skip the cleanup confirmation prompt that --prune would otherwise show. Required for --prune in non-interactive sessions.",
+        };
+
         var command = new Command("sync", "Synchronize manifest entries into their target directories.");
         command.Options.Add(entryOption);
         command.Options.Add(dryRunOption);
         command.Options.Add(stopOnFirstErrorOption);
         command.Options.Add(forceOption);
         command.Options.Add(parallelOption);
+        command.Options.Add(pruneOption);
+        command.Options.Add(pruneYesOption);
 
         command.SetAction((parseResult, cancellationToken) =>
         {
             var handler = services.GetRequiredService<SyncCommandHandler>();
             return handler.InvokeAsync(
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
-                entries: parseResult.GetValue(entryOption) ?? Array.Empty<string>(),
+                entries: EntryFilter.Normalise(parseResult.GetValue(entryOption)),
                 dryRun: parseResult.GetValue(dryRunOption),
                 stopOnFirstError: parseResult.GetValue(stopOnFirstErrorOption),
                 force: parseResult.GetValue(forceOption),
                 maxParallelism: parseResult.GetValue(parallelOption),
+                prune: parseResult.GetValue(pruneOption),
+                pruneYes: parseResult.GetValue(pruneYesOption),
                 output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });
@@ -153,6 +168,7 @@ internal static class CommandTreeBuilder
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
                 force: parseResult.GetValue(forceOption),
                 interactive: parseResult.GetValue(interactiveOption),
+                output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });
 
@@ -163,7 +179,7 @@ internal static class CommandTreeBuilder
     {
         var entryOption = new Option<string[]>("--entry", "-e")
         {
-            Description = "Limit the operation to the named entry (repeatable).",
+            Description = "Limit the operation to the named entry. Repeatable, and comma-separated values are accepted (e.g. '--entry a,b -e c').",
             AllowMultipleArgumentsPerToken = true,
         };
 
@@ -182,7 +198,7 @@ internal static class CommandTreeBuilder
             return handler.InvokeAsync(
                 verb: verb,
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
-                entries: parseResult.GetValue(entryOption) ?? Array.Empty<string>(),
+                entries: EntryFilter.Normalise(parseResult.GetValue(entryOption)),
                 dryRun: parseResult.GetValue(dryRunOption),
                 output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
@@ -232,6 +248,36 @@ internal static class CommandTreeBuilder
             var handler = services.GetRequiredService<StatusCommandHandler>();
             return handler.InvokeAsync(
                 manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                output: parseResult.GetValue(CommonOptions.Output),
+                cancellationToken: cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static Command BuildCleanCommand(IServiceProvider services)
+    {
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Report which destination directories would be removed, without touching the filesystem or state.",
+        };
+
+        var yesOption = new Option<bool>("--yes", "-y")
+        {
+            Description = "Skip the interactive confirmation prompt. Required when stdin isn't a TTY or when -o json is set.",
+        };
+
+        var command = new Command("clean", "Remove destination directories whose owning entry has been deleted from the manifest. Prompts before deleting unless --yes is supplied.");
+        command.Options.Add(dryRunOption);
+        command.Options.Add(yesOption);
+
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var handler = services.GetRequiredService<CleanCommandHandler>();
+            return handler.InvokeAsync(
+                manifest: parseResult.GetValue(CommonOptions.Manifest)?.FullName,
+                dryRun: parseResult.GetValue(dryRunOption),
+                yes: parseResult.GetValue(yesOption),
                 output: parseResult.GetValue(CommonOptions.Output),
                 cancellationToken: cancellationToken);
         });

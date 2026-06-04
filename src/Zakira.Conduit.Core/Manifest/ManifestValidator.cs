@@ -89,9 +89,9 @@ public static class ManifestValidator
             var aliasedTargets = entry.Targets.Count(t => t is not null && !string.IsNullOrWhiteSpace(t.As));
             var sourceProducesMultiple = entry.Source switch
             {
-                GitHubSkillSource gh => gh.EffectivePaths.Count > 1,
-                LocalDirectorySkillSource local => local.EffectivePaths.Count > 1,
-                AzdoSkillSource azdo => azdo.EffectivePaths.Count > 1,
+                GitHubSource gh => gh.EffectivePaths.Count > 1,
+                LocalDirectorySource local => local.EffectivePaths.Count > 1,
+                AzdoSource azdo => azdo.EffectivePaths.Count > 1,
                 _ => false,
             };
 
@@ -107,23 +107,23 @@ public static class ManifestValidator
                 errors.Add($"{prefix}.source is required.");
                 break;
 
-            case GitHubSkillSource gh:
+            case GitHubSource gh:
                 ValidateGitHubSource(gh, prefix, errors);
                 break;
 
-            case LocalDirectorySkillSource local:
+            case LocalDirectorySource local:
                 ValidateLocalSource(local, prefix, errors);
                 break;
 
-            case AzdoSkillSource azdo:
+            case AzdoSource azdo:
                 ValidateAzdoSource(azdo, prefix, errors);
                 break;
 
-            case UriBasedSkillSource:
+            case UriBasedSource:
                 errors.Add($"{prefix}.source: 'uri'-shaped source reached the validator without being resolved. This is a wiring bug; ensure the manifest loader's inference coordinator is registered.");
                 break;
 
-            case AliasedSkillSource:
+            case AliasedSource:
                 errors.Add($"{prefix}.source: aliased wrapper source reached the validator without being unwrapped. This is a wiring bug; ensure the manifest loader's inference coordinator is registered.");
                 break;
 
@@ -133,7 +133,7 @@ public static class ManifestValidator
         }
     }
 
-    private static void ValidateGitHubSource(GitHubSkillSource source, string prefix, List<string> errors)
+    private static void ValidateGitHubSource(GitHubSource source, string prefix, List<string> errors)
     {
         if (!GitHubRepoReference.TryParse(source.Repo, out _, out _, out var parseError))
         {
@@ -150,10 +150,24 @@ public static class ManifestValidator
             errors.Add($"{prefix}.source: 'path' and 'paths' are mutually exclusive.");
         }
 
+        if (source.Auth is { Count: > 0 })
+        {
+            var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "env", "gh", "pat", "anonymous", "options" };
+            foreach (var mode in source.Auth)
+            {
+                if (!allowed.Contains(mode))
+                {
+                    errors.Add($"{prefix}.source.auth: unknown mode '{mode}'. Allowed: env, gh, pat, anonymous.");
+                }
+            }
+        }
+
         ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: true, errors);
+        ValidateFilterPatterns(source.Include, $"{prefix}.source.include", errors);
+        ValidateFilterPatterns(source.Exclude, $"{prefix}.source.exclude", errors);
     }
 
-    private static void ValidateLocalSource(LocalDirectorySkillSource source, string prefix, List<string> errors)
+    private static void ValidateLocalSource(LocalDirectorySource source, string prefix, List<string> errors)
     {
         if (source.Path is not null && source.Paths is { Count: > 0 })
         {
@@ -166,9 +180,11 @@ public static class ManifestValidator
         }
 
         ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: false, errors);
+        ValidateFilterPatterns(source.Include, $"{prefix}.source.include", errors);
+        ValidateFilterPatterns(source.Exclude, $"{prefix}.source.exclude", errors);
     }
 
-    private static void ValidateAzdoSource(AzdoSkillSource source, string prefix, List<string> errors)
+    private static void ValidateAzdoSource(AzdoSource source, string prefix, List<string> errors)
     {
         var hasUrl = !string.IsNullOrWhiteSpace(source.Url);
         var hasTriplet = !string.IsNullOrWhiteSpace(source.Organization)
@@ -221,6 +237,8 @@ public static class ManifestValidator
         }
 
         ValidateSubPaths(source.EffectivePaths, $"{prefix}.source", requireRepoRelative: true, errors);
+        ValidateFilterPatterns(source.Include, $"{prefix}.source.include", errors);
+        ValidateFilterPatterns(source.Exclude, $"{prefix}.source.exclude", errors);
     }
 
     /// <summary>
@@ -294,6 +312,28 @@ public static class ManifestValidator
     }
 
     /// <summary>
+    ///     Validates a list of glob patterns used by <c>include</c> /
+    ///     <c>exclude</c>: every entry must be a non-empty, non-whitespace
+    ///     string. Empty / null lists are allowed and treated as "no
+    ///     constraint" by the mirror.
+    /// </summary>
+    private static void ValidateFilterPatterns(IReadOnlyList<string>? patterns, string prefix, List<string> errors)
+    {
+        if (patterns is null || patterns.Count == 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < patterns.Count; i++)
+        {
+            if (string.IsNullOrWhiteSpace(patterns[i]))
+            {
+                errors.Add($"{prefix}[{i}] must be a non-empty glob pattern.");
+            }
+        }
+    }
+
+    /// <summary>
     ///     Detects two entries that would write into the same destination
     ///     directory (<c>&lt;targetPath&gt;/&lt;destName&gt;/</c>). The check
     ///     is conservative: it compares target path <i>strings</i> as-written
@@ -344,9 +384,9 @@ public static class ManifestValidator
     {
         var paths = entry.Source switch
         {
-            GitHubSkillSource gh => gh.EffectivePaths,
-            LocalDirectorySkillSource local => local.EffectivePaths,
-            AzdoSkillSource azdo => azdo.EffectivePaths,
+            GitHubSource gh => gh.EffectivePaths,
+            LocalDirectorySource local => local.EffectivePaths,
+            AzdoSource azdo => azdo.EffectivePaths,
             _ => Array.Empty<PathSpec>(),
         };
 

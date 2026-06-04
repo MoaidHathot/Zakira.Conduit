@@ -3,7 +3,7 @@ using Zakira.Conduit.Manifest;
 namespace Zakira.Conduit.Sources;
 
 /// <summary>
-///     One materialized piece of content produced by an <see cref="ISkillSourceFetcher"/>.
+///     One materialized piece of content produced by an <see cref="ISourceFetcher"/>.
 ///     A single source may produce several of these &mdash; for example a GitHub
 ///     source with multiple <c>paths</c>, or a local source pointing at several
 ///     directories.
@@ -55,11 +55,11 @@ public sealed class FetchedSource : IAsyncDisposable
     public string? Etag { get; }
 
     /// <summary>The originating source, kept for diagnostics.</summary>
-    public ISkillSource Source { get; }
+    public ISource Source { get; }
 
     public FetchedSource(
         IReadOnlyList<FetchedContent> contents,
-        ISkillSource source,
+        ISource source,
         string? resolvedRef = null,
         string? etag = null,
         bool notModified = false,
@@ -83,13 +83,13 @@ public sealed class FetchedSource : IAsyncDisposable
     /// <summary>
     ///     Convenience factory for the single-unit case.
     /// </summary>
-    public static FetchedSource FromSingleDirectory(string contentDirectory, ISkillSource source, string? resolvedRef = null, string? etag = null, Func<ValueTask>? cleanup = null) =>
+    public static FetchedSource FromSingleDirectory(string contentDirectory, ISource source, string? resolvedRef = null, string? etag = null, Func<ValueTask>? cleanup = null) =>
         new(new[] { new FetchedContent(contentDirectory) }, source, resolvedRef, etag, notModified: false, cleanup);
 
     /// <summary>
     ///     Convenience factory for the "nothing changed" case.
     /// </summary>
-    public static FetchedSource Unchanged(ISkillSource source, string? resolvedRef = null, string? etag = null) =>
+    public static FetchedSource Unchanged(ISource source, string? resolvedRef = null, string? etag = null) =>
         new(Array.Empty<FetchedContent>(), source, resolvedRef, etag, notModified: true, cleanup: null);
 
     public async ValueTask DisposeAsync()

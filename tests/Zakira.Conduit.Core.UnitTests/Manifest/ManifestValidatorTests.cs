@@ -7,7 +7,7 @@ public sealed class ManifestValidatorTests
     private static ConduitEntry ValidEntry(string name = "ok") => new()
     {
         Name = name,
-        Source = new GitHubSkillSource { Repo = "o/r" },
+        Source = new GitHubSource { Repo = "o/r" },
         Targets = ["./out"],
     };
 
@@ -59,7 +59,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Repo = repo },
+                    Source = new GitHubSource { Repo = repo },
                     Targets = ["./o"],
                 }
             ],
@@ -84,7 +84,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Repo = repo },
+                    Source = new GitHubSource { Repo = repo },
                     Targets = ["./o"],
                 }
             ],
@@ -103,7 +103,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Repo = "o/r", Commit = "abc", Branch = "main" },
+                    Source = new GitHubSource { Repo = "o/r", Commit = "abc", Branch = "main" },
                     Targets = ["./o"],
                 }
             ],
@@ -125,7 +125,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Repo = "o/r", Path = "a", Paths = ["b"] },
+                    Source = new GitHubSource { Repo = "o/r", Path = "a", Paths = ["b"] },
                     Targets = ["./o"],
                 }
             ],
@@ -144,7 +144,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new LocalDirectorySkillSource { Path = "a", Paths = ["b"] },
+                    Source = new LocalDirectorySource { Path = "a", Paths = ["b"] },
                     Targets = ["./o"],
                 }
             ],
@@ -163,7 +163,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Repo = "o/r", Paths = ["dir1/foo", "dir2/foo"] },
+                    Source = new GitHubSource { Repo = "o/r", Paths = ["dir1/foo", "dir2/foo"] },
                     Targets = ["./o"],
                 }
             ],
@@ -182,7 +182,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new LocalDirectorySkillSource { Paths = ["./a/skill", "./b/skill"] },
+                    Source = new LocalDirectorySource { Paths = ["./a/skill", "./b/skill"] },
                     Targets = ["./o"],
                 }
             ],
@@ -204,7 +204,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new GitHubSkillSource { Repo = "o/r", Path = path },
+                    Source = new GitHubSource { Repo = "o/r", Path = path },
                     Targets = ["./o"],
                 }
             ],
@@ -224,7 +224,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new LocalDirectorySkillSource(),
+                    Source = new LocalDirectorySource(),
                     Targets = ["./o"],
                 }
             ],
@@ -243,7 +243,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new LocalDirectorySkillSource { Path = "./skills/foo" },
+                    Source = new LocalDirectorySource { Path = "./skills/foo" },
                     Targets = ["./o"],
                 }
             ],
@@ -262,7 +262,7 @@ public sealed class ManifestValidatorTests
                 new ConduitEntry
                 {
                     Name = "x",
-                    Source = new LocalDirectorySkillSource { Paths = ["./a", "./b"] },
+                    Source = new LocalDirectorySource { Paths = ["./a", "./b"] },
                     Targets = ["./o"],
                 }
             ],

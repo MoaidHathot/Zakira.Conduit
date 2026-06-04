@@ -59,6 +59,7 @@ public static class Program
         serviceCollection.AddSingleton<PinUpdateCommandHandler>();
         serviceCollection.AddSingleton<WatchCommandHandler>();
         serviceCollection.AddSingleton<StatusCommandHandler>();
+        serviceCollection.AddSingleton<CleanCommandHandler>();
 
         return serviceCollection.BuildServiceProvider();
     }

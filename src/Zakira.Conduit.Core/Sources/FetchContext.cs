@@ -1,7 +1,7 @@
 namespace Zakira.Conduit.Sources;
 
 /// <summary>
-///     Context handed to every <see cref="ISkillSourceFetcher"/> when materializing
+///     Context handed to every <see cref="ISourceFetcher"/> when materializing
 ///     a source. Carries the originating manifest's path so fetchers can resolve
 ///     relative inputs (e.g. <c>./skills</c>) against the manifest's directory,
 ///     plus optional cache hints used for conditional fetches.

@@ -20,19 +20,19 @@ internal sealed class InitCommandHandler
         _logger = logger;
     }
 
-    public async Task<int> InvokeAsync(string? manifest, bool force, bool interactive, CancellationToken cancellationToken)
+    public async Task<int> InvokeAsync(string? manifest, bool force, bool interactive, OutputFormat output, CancellationToken cancellationToken)
     {
         var targetPath = ResolveTargetPath(manifest);
 
         if (File.Exists(targetPath) && !force)
         {
-            Console.Error.WriteLine($"error: manifest already exists at '{targetPath}'. Use --force to overwrite.");
+            EmitInitError(targetPath, "manifest already exists; pass --force to overwrite.", output);
             return 2;
         }
 
         if (interactive && (Console.IsInputRedirected || Console.IsOutputRedirected))
         {
-            Console.Error.WriteLine("error: --interactive requires an attached TTY (stdin and stdout must not be redirected).");
+            EmitInitError(targetPath, "--interactive requires an attached TTY (stdin and stdout must not be redirected).", output);
             return 2;
         }
 
@@ -54,8 +54,45 @@ internal sealed class InitCommandHandler
         }
 
         _logger.LogInformation("Wrote starter manifest to {Path}", targetPath);
-        Console.WriteLine($"Wrote starter manifest to {targetPath}");
+
+        if (output == OutputFormat.Json)
+        {
+            var dto = new
+            {
+                ok = true,
+                manifest = targetPath,
+                created = true,
+                forced = force,
+                interactive,
+            };
+            Console.WriteLine(JsonSerializer.Serialize(dto, ManifestJson.WriteOptions));
+        }
+        else
+        {
+            Console.WriteLine($"Wrote starter manifest to {targetPath}");
+        }
+
         return 0;
+    }
+
+    private static void EmitInitError(string targetPath, string message, OutputFormat output)
+    {
+        if (output == OutputFormat.Json)
+        {
+            var dto = new
+            {
+                ok = false,
+                manifest = targetPath,
+                error = message,
+            };
+            // Keep parity with ErrorRenderer: JSON error envelope goes to stdout
+            // so consumers can `jq` failures too.
+            Console.WriteLine(JsonSerializer.Serialize(dto, ManifestJson.WriteOptions));
+        }
+        else
+        {
+            Console.Error.WriteLine($"error: {message} (path: {targetPath})");
+        }
     }
 
     private string ResolveTargetPath(string? manifest)
@@ -92,7 +129,7 @@ internal sealed class InitCommandHandler
                 {
                     Name = "example-skill",
                     Description = "Replace me. Each entry mirrors a remote skill source into one or more local target directories.",
-                    Source = new GitHubSkillSource
+                    Source = new GitHubSource
                     {
                         Repo = "owner/repo",
                         Path = "path/inside/repo",
@@ -124,14 +161,14 @@ internal sealed class InitCommandHandler
             defaultOption: "github",
             cancellationToken: cancellationToken);
 
-        ISkillSource source;
+        ISource source;
         string nameSuggestion;
 
         if (kind == "local")
         {
             var path = Prompt("Source directory (absolute, or relative to the manifest)", "./skills", cancellationToken);
             nameSuggestion = SuggestEntryNameFromLocal(path);
-            source = new LocalDirectorySkillSource { Path = path };
+            source = new LocalDirectorySource { Path = path };
         }
         else
         {
@@ -140,7 +177,7 @@ internal sealed class InitCommandHandler
             var branch = PromptOptional("Branch (leave empty for the default branch)", cancellationToken);
 
             nameSuggestion = SuggestEntryNameFromGitHub(repo, subPath);
-            source = new GitHubSkillSource
+            source = new GitHubSource
             {
                 Repo = repo,
                 Path = string.IsNullOrWhiteSpace(subPath) ? null : subPath,

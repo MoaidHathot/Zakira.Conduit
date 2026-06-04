@@ -14,6 +14,6 @@ public sealed class AnonymousCredentialProvider : IAzdoCredentialProvider
     public string Mode => "anonymous";
 
     /// <inheritdoc />
-    public Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSkillSource source, CancellationToken cancellationToken = default) =>
+    public Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSource source, CancellationToken cancellationToken = default) =>
         Task.FromResult<AuthenticationHeaderValue?>(null);
 }

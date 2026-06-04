@@ -1,0 +1,21 @@
+# Default: treat all text files as auto and store with LF in the repo.
+# Working copies on Windows can still be CRLF if core.autocrlf=true at the
+# user/system level, but the canonical on-disk form here is LF.
+* text=auto eol=lf
+
+# Common binary blobs Conduit might mirror, mark explicitly so diff/merge
+# don't try to be clever.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.7z binary
+*.pdf binary
+*.dll binary
+*.pdb binary
+*.exe binary
+*.snk binary

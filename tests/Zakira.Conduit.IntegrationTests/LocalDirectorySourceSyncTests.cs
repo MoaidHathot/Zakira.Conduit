@@ -28,7 +28,7 @@ public sealed class LocalDirectorySourceSyncTests
                 new ConduitEntry
                 {
                     Name = "review",
-                    Source = new LocalDirectorySkillSource { Path = "./source-skills/code-review" },
+                    Source = new LocalDirectorySource { Path = "./source-skills/code-review" },
                     Targets = [tmp.Combine("agentA"), tmp.Combine("agentB")],
                 },
             ],
@@ -63,7 +63,7 @@ public sealed class LocalDirectorySourceSyncTests
                 new ConduitEntry
                 {
                     Name = "skill",
-                    Source = new LocalDirectorySkillSource { Path = sourceDir },
+                    Source = new LocalDirectorySource { Path = sourceDir },
                     Targets = [tmp.Combine("dest")],
                 },
             ],
@@ -106,13 +106,13 @@ public sealed class LocalDirectorySourceSyncTests
                 new ConduitEntry
                 {
                     Name = "bad",
-                    Source = new LocalDirectorySkillSource { Path = tmp.Combine("does-not-exist") },
+                    Source = new LocalDirectorySource { Path = tmp.Combine("does-not-exist") },
                     Targets = [tmp.Combine("dest")],
                 },
                 new ConduitEntry
                 {
                     Name = "good",
-                    Source = new LocalDirectorySkillSource { Path = goodSource },
+                    Source = new LocalDirectorySource { Path = goodSource },
                     Targets = [tmp.Combine("dest")],
                 },
             ],

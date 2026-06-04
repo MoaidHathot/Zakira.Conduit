@@ -6,7 +6,7 @@ namespace Zakira.Conduit.Sources.Azdo.Credentials;
 
 /// <summary>
 ///     Reads a PAT from an explicit env var named by
-///     <see cref="AzdoSkillSource.PatEnv"/>. Useful when one manifest references
+///     <see cref="AzdoSource.PatEnv"/>. Useful when one manifest references
 ///     several AzDO orgs with different tokens.
 /// </summary>
 public sealed class ExplicitPatCredentialProvider : IAzdoCredentialProvider
@@ -23,7 +23,7 @@ public sealed class ExplicitPatCredentialProvider : IAzdoCredentialProvider
     public string Mode => "pat";
 
     /// <inheritdoc />
-    public Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSkillSource source, CancellationToken cancellationToken = default)
+    public Task<AuthenticationHeaderValue?> TryGetAsync(AzdoSource source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
 

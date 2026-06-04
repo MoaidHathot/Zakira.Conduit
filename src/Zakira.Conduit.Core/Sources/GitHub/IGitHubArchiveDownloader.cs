@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+
 namespace Zakira.Conduit.Sources.GitHub;
 
 /// <summary>
@@ -34,6 +36,14 @@ public interface IGitHubArchiveDownloader
     ///     is <see langword="null"/>, the repository's default branch is used.
     ///     When <paramref name="ifNoneMatchEtag"/> is set, the downloader sends
     ///     <c>If-None-Match</c> and short-circuits on HTTP 304.
+    ///     <para>
+    ///         <paramref name="authHeader"/>, when supplied, is attached as the
+    ///         outbound request's <c>Authorization</c> header (typically a
+    ///         <c>Bearer ...</c> resolved from the GitHub credential chain).
+    ///         When <see langword="null"/>, the downloader falls back to the
+    ///         token configured in <see cref="GitHubFetcherOptions"/>, and to
+    ///         anonymous access if that is also unset.
+    ///     </para>
     /// </summary>
     Task<GitHubDownloadResult> DownloadAsync(
         string owner,
@@ -41,5 +51,6 @@ public interface IGitHubArchiveDownloader
         string? gitRef,
         Stream destinationStream,
         string? ifNoneMatchEtag = null,
+        AuthenticationHeaderValue? authHeader = null,
         CancellationToken cancellationToken = default);
 }

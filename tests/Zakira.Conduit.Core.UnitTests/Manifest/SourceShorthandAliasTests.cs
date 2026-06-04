@@ -5,12 +5,12 @@ namespace Zakira.Conduit.Core.UnitTests.Manifest;
 
 public sealed class SourceShorthandAliasTests
 {
-    private static SkillSourceInferenceCoordinator BuildCoordinator() =>
-        new(new ISkillSourceInferrer[]
+    private static SourceInferenceCoordinator BuildCoordinator() =>
+        new(new ISourceInferrer[]
         {
-            new LocalDirectorySkillSourceInferrer(),
-            new GitHubSkillSourceInferrer(),
-            new AzdoSkillSourceInferrer(),
+            new LocalDirectorySourceInferrer(),
+            new GitHubSourceInferrer(),
+            new AzdoSourceInferrer(),
         });
 
     private static ConduitManifest LoadFromJson(string json)
@@ -40,7 +40,7 @@ public sealed class SourceShorthandAliasTests
 
         manifest.Entries.Should().HaveCount(1);
         manifest.Entries[0].Name.Should().Be("MyAlias");
-        manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<GitHubSource>();
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class SourceShorthandAliasTests
 
         var manifest = LoadFromJson(json);
         manifest.Entries[0].Name.Should().Be("WrappedName");
-        manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>();
+        manifest.Entries[0].Source.Should().BeOfType<GitHubSource>();
     }
 
     [Fact]
@@ -173,7 +173,7 @@ public sealed class SourceShorthandAliasTests
 
         var manifest = LoadFromJson(json);
         manifest.Entries[0].Name.Should().Be("FromObject");
-        var gh = manifest.Entries[0].Source.Should().BeOfType<GitHubSkillSource>().Subject;
+        var gh = manifest.Entries[0].Source.Should().BeOfType<GitHubSource>().Subject;
         gh.Path.Should().Be("skills");
         gh.Branch.Should().Be("main");
     }

@@ -9,6 +9,7 @@ using Zakira.Conduit.Sources;
 using Zakira.Conduit.Sources.Azdo;
 using Zakira.Conduit.Sources.Azdo.Credentials;
 using Zakira.Conduit.Sources.GitHub;
+using Zakira.Conduit.Sources.GitHub.Credentials;
 using Zakira.Conduit.Sources.Inference;
 using Zakira.Conduit.Sources.Local;
 using Zakira.Conduit.Synchronization;
@@ -34,44 +35,49 @@ public static class ConduitCoreServiceCollectionExtensions
 
         services.TryAddSingleton<IManifestLocator, DefaultManifestLocator>();
         services.TryAddSingleton<IManifestLoader>(sp =>
-            new JsonManifestLoader(sp.GetService<SkillSourceInferenceCoordinator>()));
+            new JsonManifestLoader(
+                sp.GetService<SourceInferenceCoordinator>(),
+                sp.GetService<IPathResolver>()));
         services.TryAddSingleton<IManifestWriter, JsonNodeManifestWriter>();
         services.TryAddSingleton<IPathResolver, DefaultPathResolver>();
         services.TryAddSingleton<IDirectoryMirror, AtomicDirectoryMirror>();
-        services.TryAddSingleton<ISkillSourceFetcherRegistry, DefaultSkillSourceFetcherRegistry>();
+        services.TryAddSingleton<ISourceFetcherRegistry, DefaultSourceFetcherRegistry>();
         services.TryAddSingleton<IConduitStateStore, JsonConduitStateStore>();
         services.TryAddSingleton<IConduitSynchronizer, DefaultConduitSynchronizer>();
+        services.TryAddSingleton<IOrphanCleaner, DefaultOrphanCleaner>();
 
-        services.AddGitHubSkillSource(configureGitHub);
-        services.AddLocalDirectorySkillSource();
-        services.AddAzdoSkillSource();
-        services.AddSkillSourceInference();
+        services.AddGitHubSource(configureGitHub);
+        services.AddLocalDirectorySource();
+        services.AddAzdoSource();
+        services.AddSourceInference();
 
         return services;
     }
 
     /// <summary>
-    ///     Registers the local-directory <see cref="ISkillSourceFetcher"/>.
+    ///     Registers the local-directory <see cref="ISourceFetcher"/>.
     ///     Safe to call standalone if you only want the local source.
     /// </summary>
-    public static IServiceCollection AddLocalDirectorySkillSource(this IServiceCollection services)
+    public static IServiceCollection AddLocalDirectorySource(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton<IPathResolver, DefaultPathResolver>();
-        services.AddSingleton<ISkillSourceFetcher, LocalDirectorySkillSourceFetcher>();
+        services.AddSingleton<ISourceFetcher, LocalDirectorySourceFetcher>();
 
         return services;
     }
 
     /// <summary>
-    ///     Registers the GitHub <see cref="ISkillSourceFetcher"/> and its
+    ///     Registers the GitHub <see cref="ISourceFetcher"/> and its
     ///     <see cref="HttpClient"/> with sensible defaults. Safe to call
     ///     standalone if you only want the GitHub source.
     /// </summary>
-    public static IServiceCollection AddGitHubSkillSource(this IServiceCollection services, Action<GitHubFetcherOptions>? configure = null)
+    public static IServiceCollection AddGitHubSource(this IServiceCollection services, Action<GitHubFetcherOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton<IEnvironment, SystemEnvironment>();
 
         services.AddOptions<GitHubFetcherOptions>()
             .Configure(static opts =>
@@ -113,17 +119,27 @@ public static class ConduitCoreServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromSeconds(60);
             });
 
-        services.AddSingleton<ISkillSourceFetcher, GitHubSkillSourceFetcher>();
+        // Credential providers registered in canonical order. The chain itself
+        // is driven by GitHubSource.ResolvedAuthChain at call time.
+        services.TryAddSingleton<IProcessRunner, SystemProcessRunner>();
+        services.AddSingleton<IGitHubCredentialProvider, EnvironmentTokenCredentialProvider>();
+        services.AddSingleton<IGitHubCredentialProvider, GhCliCredentialProvider>();
+        services.AddSingleton<IGitHubCredentialProvider, Sources.GitHub.Credentials.ExplicitPatCredentialProvider>();
+        services.AddSingleton<IGitHubCredentialProvider, OptionsTokenCredentialProvider>();
+        services.AddSingleton<IGitHubCredentialProvider, Sources.GitHub.Credentials.AnonymousCredentialProvider>();
+        services.AddSingleton<ChainedGitHubCredentialProvider>();
+
+        services.AddSingleton<ISourceFetcher, GitHubSourceFetcher>();
 
         return services;
     }
 
     /// <summary>
-    ///     Registers the Azure DevOps <see cref="ISkillSourceFetcher"/> and its
+    ///     Registers the Azure DevOps <see cref="ISourceFetcher"/> and its
     ///     <see cref="HttpClient"/>s with sensible defaults. Safe to call
     ///     standalone if you only want the AzDO source.
     /// </summary>
-    public static IServiceCollection AddAzdoSkillSource(this IServiceCollection services, Action<AzdoFetcherOptions>? configure = null)
+    public static IServiceCollection AddAzdoSource(this IServiceCollection services, Action<AzdoFetcherOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
@@ -136,12 +152,12 @@ public static class ConduitCoreServiceCollectionExtensions
         }
 
         // Credential providers registered in canonical order; the chain itself
-        // is driven by AzdoSkillSource.ResolvedAuthChain at call time.
+        // is driven by AzdoSource.ResolvedAuthChain at call time.
         services.TryAddSingleton<IProcessRunner, SystemProcessRunner>();
         services.AddSingleton<IAzdoCredentialProvider, EnvironmentPatCredentialProvider>();
         services.AddSingleton<IAzdoCredentialProvider, AzCliCredentialProvider>();
-        services.AddSingleton<IAzdoCredentialProvider, ExplicitPatCredentialProvider>();
-        services.AddSingleton<IAzdoCredentialProvider, AnonymousCredentialProvider>();
+        services.AddSingleton<IAzdoCredentialProvider, Sources.Azdo.Credentials.ExplicitPatCredentialProvider>();
+        services.AddSingleton<IAzdoCredentialProvider, Sources.Azdo.Credentials.AnonymousCredentialProvider>();
         services.AddSingleton<ChainedAzdoCredentialProvider>();
 
         services.AddHttpClient<IAzdoRefResolver, AzdoRefResolver>()
@@ -156,7 +172,7 @@ public static class ConduitCoreServiceCollectionExtensions
                 client.Timeout = TimeSpan.FromMinutes(5);
             });
 
-        services.AddSingleton<ISkillSourceFetcher, AzdoSkillSourceFetcher>();
+        services.AddSingleton<ISourceFetcher, AzdoSourceFetcher>();
 
         return services;
     }
@@ -167,17 +183,17 @@ public static class ConduitCoreServiceCollectionExtensions
     ///     and have the concrete kind (<c>github</c>, <c>azdo</c>,
     ///     <c>local</c>, ...) chosen automatically at load time.
     /// </summary>
-    public static IServiceCollection AddSkillSourceInference(this IServiceCollection services)
+    public static IServiceCollection AddSourceInference(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         // Order matters: local takes precedence so a './something' that
         // happens to contain 'github.com' (unlikely but possible) is still
         // resolved as a local path.
-        services.AddSingleton<ISkillSourceInferrer, LocalDirectorySkillSourceInferrer>();
-        services.AddSingleton<ISkillSourceInferrer, GitHubSkillSourceInferrer>();
-        services.AddSingleton<ISkillSourceInferrer, AzdoSkillSourceInferrer>();
-        services.AddSingleton<SkillSourceInferenceCoordinator>();
+        services.AddSingleton<ISourceInferrer, LocalDirectorySourceInferrer>();
+        services.AddSingleton<ISourceInferrer, GitHubSourceInferrer>();
+        services.AddSingleton<ISourceInferrer, AzdoSourceInferrer>();
+        services.AddSingleton<SourceInferenceCoordinator>();
 
         return services;
     }

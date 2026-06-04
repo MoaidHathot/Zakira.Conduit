@@ -17,5 +17,5 @@ public interface IAzdoRefResolver
     /// <param name="source">The source providing org/project/repo + auth.</param>
     /// <param name="refValue">The branch name, tag name, or commit SHA.</param>
     /// <param name="refKind">One of <c>"branch"</c>, <c>"tag"</c>, <c>"commit"</c>.</param>
-    Task<string> ResolveAsync(AzdoSkillSource source, string refValue, string refKind, CancellationToken cancellationToken = default);
+    Task<string> ResolveAsync(AzdoSource source, string refValue, string refKind, CancellationToken cancellationToken = default);
 }
