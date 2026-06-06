@@ -28,4 +28,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Zakira.Conduit.UnitTests" />
+  </ItemGroup>
+
 </Project>

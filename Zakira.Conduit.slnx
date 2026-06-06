@@ -7,5 +7,6 @@
     <Project Path="tests/Zakira.Conduit.Core.UnitTests/Zakira.Conduit.Core.UnitTests.csproj" />
     <Project Path="tests/Zakira.Conduit.E2ETests/Zakira.Conduit.E2ETests.csproj" />
     <Project Path="tests/Zakira.Conduit.IntegrationTests/Zakira.Conduit.IntegrationTests.csproj" />
+    <Project Path="tests/Zakira.Conduit.UnitTests/Zakira.Conduit.UnitTests.csproj" />
   </Folder>
 </Solution>

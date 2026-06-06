@@ -18,7 +18,7 @@ internal static class VerbosityParser
             var arg = args[i];
             if (arg is "-q" or "--quiet")
             {
-                return LogLevel.Warning;
+                return LogLevel.Error;
             }
 
             if (arg is "-v" or "--verbose")
@@ -37,16 +37,16 @@ internal static class VerbosityParser
             }
         }
 
-        return LogLevel.Information;
+        return LogLevel.Warning;
     }
 
     private static LogLevel Map(string value) => value.ToLowerInvariant() switch
     {
-        "q" or "quiet" => LogLevel.Warning,
+        "q" or "quiet" => LogLevel.Error,
         "m" or "minimal" => LogLevel.Warning,
         "n" or "normal" => LogLevel.Information,
         "d" or "detailed" => LogLevel.Debug,
         "diag" or "diagnostic" => LogLevel.Trace,
-        _ => LogLevel.Information,
+        _ => LogLevel.Warning,
     };
 }

@@ -14,10 +14,10 @@ internal static class CommonOptions
 
     public static Option<string> Verbosity { get; } = new("--verbosity")
     {
-        Description = "Output verbosity. One of: q[uiet], m[inimal], n[ormal], d[etailed], diag[nostic]. Default: normal.",
+        Description = "Output verbosity. One of: q[uiet] (errors only), m[inimal] (warnings + errors, default), n[ormal] (adds operational logs), d[etailed] (adds wire-level debug), diag[nostic] (everything).",
         Recursive = true,
         Arity = System.CommandLine.ArgumentArity.ZeroOrOne,
-        DefaultValueFactory = _ => "normal",
+        DefaultValueFactory = _ => "minimal",
     };
 
     public static Option<bool> Verbose { get; } = new("--verbose", "-v")
@@ -28,7 +28,7 @@ internal static class CommonOptions
 
     public static Option<bool> Quiet { get; } = new("--quiet", "-q")
     {
-        Description = "Shortcut for --verbosity quiet.",
+        Description = "Shortcut for --verbosity quiet (errors only).",
         Recursive = true,
     };
 

@@ -563,8 +563,8 @@ conduit [--manifest <path>] [--verbosity <level>|--quiet|--verbose] [--output te
 | `--parallel <N>, -p <N>`    | Maximum number of entries synced in parallel. Default: `4`. `--parallel 1` forces sequential execution. |
 | `-m, --manifest <path>`     | Override manifest discovery (global). |
 | `-o, --output text\|json`   | Output format (global). `json` keeps stdout clean for `jq`. |
-| `-v, --verbose` / `--verbosity detailed` | Verbose output. |
-| `-q, --quiet`               | Warnings and errors only. |
+| `-v, --verbose` / `--verbosity detailed` | Verbose output (wire-level debug). |
+| `-q, --quiet`               | Errors only. |
 
 ### `conduit pin` / `conduit update` options
 
@@ -623,6 +623,18 @@ conduit sync --output json | jq .succeeded
 works without ever mixing log lines into the data.
 
 In text mode, output uses ANSI colours when stdout is a terminal. Colours are disabled automatically when stdout is redirected, and you can opt out explicitly with the [`NO_COLOR`](https://no-color.org/) environment variable.
+
+### Verbosity
+
+The default verbosity is `minimal`: only warnings and errors are printed to stderr. The per-entry operational narration (`Fetching ...`, `Syncing entry ...`, `Using manifest: ...`, `[dry-run] Would mirror ...`, etc.) is opt-in via `--verbosity normal` (`-vn`) or `--verbose` / `-v`. The summary table and `--output json` payload are part of the primary stdout output and are never affected by the verbosity flag.
+
+| Flag | Floor |
+|---|---|
+| *(none)* | `minimal` &mdash; warnings + errors |
+| `-q`, `--quiet`, `--verbosity quiet` | errors only |
+| `--verbosity normal` | adds operational logs |
+| `-v`, `--verbose`, `--verbosity detailed` | adds wire-level debug |
+| `--verbosity diagnostic` | adds trace |
 
 ## Reproducibility: `pin` + `update`
 
