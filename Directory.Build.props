@@ -29,7 +29,7 @@
       change this file. That keeps git history, NuGet, and the assembly
       version in sync, and prevents accidental untracked publishes.
     -->
-    <VersionPrefix>0.4.0</VersionPrefix>
+    <VersionPrefix>0.5.0</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup Label="Repository metadata">
